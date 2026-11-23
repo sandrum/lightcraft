@@ -129,4 +129,8 @@ fn failed_gpu_renders_fall_back_with_a_reason() {
     // a request the GPU never renders is not a fallback
     let deep = RenderRequest { depth: lightcraft_pipeline::OutputDepth::U16, ..RenderRequest::fit(256, 256) };
     assert_eq!(lightcraft_gpu::try_render(&src, &info, &s, &deep, None).err(), Some(Fallback::NotTried));
+    // nor is a photo with a Light Flare, which has no GPU kernel yet: the CPU renders it
+    let mut lit = s.clone();
+    lit.light_flare.enabled = true;
+    assert_eq!(lightcraft_gpu::try_render(&src, &info, &lit, &RenderRequest::fit(256, 256), None).err(), Some(Fallback::NotTried));
 }

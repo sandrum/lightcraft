@@ -24,6 +24,14 @@ fn edit(s: &mut Session, c: &str, label: &str, f: impl FnOnce(&mut DevelopSettin
     ok()
 }
 
+/// A Light Flare command's `index` (default 0).
+fn flare_index(p: &Value, c: &str) -> Result<usize> {
+    match p.get("index") {
+        None | Some(Value::Null) => Ok(0),
+        Some(_) => index_req(p, "index", c),
+    }
+}
+
 fn section_param(p: &Value, c: &str) -> Result<Section> {
     let v = p.get("section").cloned().ok_or_else(|| bad(c, "missing `section`"))?;
     serde_json::from_value(v).map_err(|e| bad(c, e.to_string()))
@@ -629,6 +637,146 @@ pub fn specs() -> Vec<CommandSpec> {
                 })
             }
         ),
+        cmd!(
+            "lightFlare.add",
+            "Add Light Flare",
+            [],
+            None,
+            "{preset?: string, x?, y?} — another flare (at most 8), its light at x, y (fractions of the cropped frame; default: a free spot); applies the flares → {index}",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.add";
+                let name = str_param(p, "preset").map(str::to_string);
+                let at = match (p.get("x").and_then(Value::as_f64), p.get("y").and_then(Value::as_f64)) {
+                    (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some((x as f32, y as f32)),
+                    (None, None) => None,
+                    _ => return Err(bad(C, "`x` and `y` go together, as numbers")),
+                };
+                let mut index = None;
+                edit(s, C, "Add Light Flare", |d| {
+                    let fresh = !d.light_flare.enabled && d.light_flare.is_default();
+                    let lf = &mut d.light_flare;
+                    // the first flare of a photo that had none: the one the section shows, not a second
+                    if fresh {
+                        lf.flares.clear();
+                    }
+                    let i = lf.add(name.as_deref(), at).ok_or_else(|| {
+                        bad(
+                            C,
+                            if lf.flares.len() >= lightcraft_develop::flare::MAX_FLARES {
+                                "a photo holds at most 8 light flares".to_string()
+                            } else {
+                                format!("no light flare preset \"{}\" (see lightFlare.presets)", name.as_deref().unwrap_or_default())
+                            },
+                        )
+                    })?;
+                    lf.enabled = true;
+                    d.set_section_enabled("lightFlare", true);
+                    index = Some(i);
+                    Ok(())
+                })?;
+                Ok(json!({"index": index}))
+            }
+        ),
+        cmd!(
+            "lightFlare.remove",
+            "Remove Light Flare",
+            [],
+            None,
+            "{index: number} — removes that flare (the section keeps none when it was the last)",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.remove";
+                let i = index_req(p, "index", C)?;
+                edit(s, C, "Remove Light Flare", |d| {
+                    if i >= d.light_flare.flares.len() {
+                        return Err(bad(C, format!("no light flare {i} (the photo has {})", d.light_flare.flares.len())));
+                    }
+                    d.light_flare.flares.remove(i);
+                    Ok(())
+                })
+            }
+        ),
+        cmd!(
+            "lightFlare.preset",
+            "Light Flare Preset",
+            [],
+            None,
+            "{preset: string, index?: number} — flare `index`'s (default 0) elements from that preset of `lightFlare.presets`, keeping its position and controls; applies the flares",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.preset";
+                let name = str_param(p, "preset").ok_or_else(|| bad(C, "missing `preset` (see lightFlare.presets)"))?.to_string();
+                let i = flare_index(p, C)?;
+                let mut chosen = None;
+                edit(s, C, "Light Flare Preset", |d| {
+                    let n = d.light_flare.flares.len();
+                    if i >= n {
+                        return Err(bad(C, format!("no light flare {i} (the photo has {n})")));
+                    }
+                    if !d.light_flare.choose_preset(i, &name) {
+                        return Err(bad(C, format!("no light flare preset \"{name}\" (see lightFlare.presets)")));
+                    }
+                    d.light_flare.enabled = true;
+                    d.set_section_enabled("lightFlare", true);
+                    let f = &d.light_flare.flares[i];
+                    chosen = Some((f.preset.clone(), f.category.id()));
+                    Ok(())
+                })?;
+                let (preset, category) = chosen.unwrap_or_default();
+                Ok(json!({"preset": preset, "category": category, "index": i}))
+            }
+        ),
+        cmd!(
+            "lightFlare.texture",
+            "Light Flare Texture",
+            [],
+            None,
+            "{index?: number, texture?: string, flipX?: bool, flipY?: bool} — the lens dirt or film texture flare `index`'s (default 0) light shows (an id from `lightFlare.presets`; \"none\" removes it)",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.texture";
+                let i = flare_index(p, C)?;
+                let kind = match str_param(p, "texture") {
+                    None => None,
+                    Some(id) => Some(
+                        lightcraft_develop::flare::TextureKind::from_id(id)
+                            .ok_or_else(|| bad(C, format!("no texture \"{id}\" (see lightFlare.presets)")))?,
+                    ),
+                };
+                let (fx, fy) = (p.get("flipX").and_then(Value::as_bool), p.get("flipY").and_then(Value::as_bool));
+                edit(s, C, "Light Flare Texture", |d| {
+                    let n = d.light_flare.flares.len();
+                    let t = &mut d.light_flare.flares.get_mut(i).ok_or_else(|| bad(C, format!("no light flare {i} (the photo has {n})")))?.texture;
+                    if let Some(k) = kind {
+                        t.kind = k;
+                    }
+                    if let Some(v) = fx {
+                        t.flip_x = v;
+                    }
+                    if let Some(v) = fy {
+                        t.flip_y = v;
+                    }
+                    Ok(())
+                })
+            }
+        ),
+        cmd!(query "lightFlare.presets", "Light Flare Presets", [], None, "{category?: \"anamorphic\"|\"spherical\"|\"sunFlare\"|\"streak\"} — the preset library and the textures", always, |_, p| {
+            use lightcraft_develop::flare::{FlareCategory, TextureKind, presets};
+            let only = str_param(p, "category");
+            if let Some(c) = only
+                && !FlareCategory::ALL.iter().any(|k| k.id() == c)
+            {
+                return Err(bad("lightFlare.presets", "`category` is anamorphic, spherical, sunFlare or streak"));
+            }
+            let categories: Vec<Value> = FlareCategory::ALL
+                .into_iter()
+                .filter(|c| only.is_none_or(|o| o == c.id()))
+                .map(|c| json!({"id": c.id(), "label": c.label(), "presets": presets(c).map(|p| p.name).collect::<Vec<_>>()}))
+                .collect();
+            let textures: Vec<Value> = TextureKind::ALL.into_iter().map(|t| json!({"id": t.id(), "label": t.label()})).collect();
+            Ok(json!({"categories": categories, "textures": textures}))
+        }),
         cmd!("develop.sectionEnabled", "Toggle Section", [], None, "{section: string, enabled: bool}", has_active, |s, p| {
             let sec = str_param(p, "section").ok_or_else(|| bad("develop.sectionEnabled", "missing section"))?.to_string();
             let on = bool_or(p, "enabled", true);

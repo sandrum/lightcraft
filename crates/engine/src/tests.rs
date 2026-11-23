@@ -35,6 +35,7 @@ mod keyword_list;
 mod lens_refresh;
 mod libops;
 mod library;
+mod light_flare;
 mod lightroom_folder;
 mod mask_effects;
 mod mask_geometry;

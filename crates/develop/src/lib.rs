@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod controls;
+pub mod flare;
 pub mod presets;
 pub mod segmask;
 pub mod settings;
@@ -48,6 +49,13 @@ impl DevelopSettings {
         if let Some(detail) = v.get_mut("detail").and_then(Value::as_object_mut) {
             detail.insert("nr_outliers".into(), Value::Bool(self.detail.nr_outliers));
         }
+        // The flare is left out while it is off and untouched, but copying or a preset must still be able to turn
+        // another photo's flare off.
+        if let Some(obj) = v.as_object_mut()
+            && !obj.contains_key("light_flare")
+        {
+            obj.insert("light_flare".into(), serde_json::to_value(&self.light_flare).unwrap_or(Value::Null));
+        }
         v
     }
 
@@ -88,6 +96,8 @@ impl DevelopSettings {
                 controls::set(self, c.id, v);
             }
         }
+        // non-finite flare controls, too many flares, elements or rays: the flares' own limits
+        self.light_flare = std::mem::take(&mut self.light_flare).sanitized();
         let c = &mut self.curve;
         for p in [&mut c.master, &mut c.red, &mut c.green, &mut c.blue].into_iter().flatten() {
             *p = lightcraft_geom::Point::new(p.x.clamp(0.0, 1.0), p.y.clamp(0.0, 1.0));

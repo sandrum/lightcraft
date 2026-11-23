@@ -220,6 +220,8 @@ pub struct FinishParams {
     pub px_per_long: f64,
     /// The window's offset and the whole output's size (pixels): `(0, 0, w, h)` unless windowed.
     pub view: [f32; 4],
+    /// Light Flares laid out on the whole output frame ([`crate::flare`]); empty when off.
+    pub flares: Vec<crate::flare::Prepared>,
     /// Peak linear output relative to SDR white: 1 for SDR renders; `2^max_ev` for an HDR render
     /// ([`OutputDepth::F32Hdr`] with HDR on), which keeps values above 1 instead of clipping them.
     pub peak: f32,
@@ -260,8 +262,20 @@ impl FinishParams {
         let grain = if effects && finite_frame { GrainModel::new(s, px_per_long, draft) } else { None };
         let calibration = s.section_enabled("calibration");
         let peak = s.hdr.peak();
+        let view = frame.view.map_or([0.0, 0.0, w as f32, h as f32], |v| [v.x as f32, v.y as f32, v.full_w as f32, v.full_h as f32]);
+        // full-size frame pixels per output pixel: the flare's thin details are sized as in the export
+        let full_long = info.native_long.unwrap_or(0).max(frame.ow.max(frame.oh) as usize).max(1) as f64;
+        let flares = if finite_frame && s.light_flare.is_active() && s.section_enabled("lightFlare") {
+            let canvas = crate::flare::PxRect::new(0, 0, view[2].round() as i32, view[3].round() as i32);
+            let detail_diag = (f64::from(view[2]).hypot(f64::from(view[3])) * full_long / px_per_long) as f32;
+            let each = s.light_flare.flares.iter().take(lightcraft_develop::flare::MAX_FLARES);
+            each.map(|f| crate::flare::prepare(f, canvas, Some(detail_diag))).filter(|f| !f.is_dark()).collect()
+        } else {
+            Vec::new()
+        };
         FinishParams {
             peak,
+            flares,
             calib: if calibration { crate::colorops::calibration_matrix(&s.calibration) } else { None },
             shadow_tint: if calibration { (s.calibration.shadows_tint / 100.0) as f32 } else { 0.0 },
             tone: base_tone(s, info, peak),
@@ -300,7 +314,7 @@ impl FinishParams {
             w,
             h,
             px_per_long,
-            view: frame.view.map_or([0.0, 0.0, w as f32, h as f32], |v| [v.x as f32, v.y as f32, v.full_w as f32, v.full_h as f32]),
+            view,
         }
     }
 
@@ -425,6 +439,17 @@ pub(crate) fn finish_deep(p: &Prepared, s: &DevelopSettings, frame: &Frame, info
 /// The per-pixel stage: every output pixel's colour in the output primaries, encoded with the sRGB
 /// curve (tone curves and grain applied; not clamped), handed to `store` for the final encoding.
 /// `exact`: encode with the exact sRGB curve instead of the (8/10-bit accurate) table.
+/// Light Flares: each one's light at `(x, y)` (frame pixels) screened over the encoded colour `e`
+/// in turn (screening is order-free); they add nothing above SDR white. `row` holds each flare with
+/// its elements that reach the pixel's row.
+#[inline]
+fn screen_flares(row: &[(&crate::flare::Prepared, Vec<&crate::flare::Elem>)], x: f32, y: f32, e: &mut [f32; 3]) {
+    for (f, live) in row {
+        let l = f.light_of(live, x, y);
+        *e = std::array::from_fn(|k| e[k] + l[k] * (1.0 - e[k].clamp(0.0, 1.0)));
+    }
+}
+
 pub(crate) fn finish_with<T: Copy + Default + Send>(
     p: &Prepared,
     fp: &FinishParams,
@@ -450,6 +475,10 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
     for_rows(&mut out, w, |y, row| {
         // the crystal grain of the whole row at once when its pixels are axis-aligned
         let crystal_row = crystal_row(fp, y, row.len());
+        // each flare's elements that reach this row of the whole frame
+        let (fx, fy) = (vx.floor() as i32, (vy + y as f32).floor() as i32);
+        let band = crate::flare::PxRect::new(fx, fy, fx + row.len() as i32, fy + 1);
+        let flare_row: Vec<_> = fp.flares.iter().map(|f| (f, f.live(band))).collect();
         for (x, px) in row.iter_mut().enumerate() {
             let i = y * w + x;
             let raw = p.img.data[i];
@@ -584,6 +613,7 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                     e = refine_saturation(e0, e, fp.refine_sat);
                 }
             }
+            screen_flares(&flare_row, vx + x as f32 + 0.5, vy + y as f32 + 0.5, &mut e);
             match grain {
                 Some(GrainModel::Value(g)) => {
                     // V1/V2 (frozen): exactly the arithmetic those processes always had

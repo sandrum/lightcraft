@@ -19,6 +19,7 @@ mod filmstrip;
 mod geometry;
 mod info;
 mod lens_blur;
+mod light_flare;
 mod look_ahead;
 mod masks;
 mod retouch;
@@ -50,6 +51,7 @@ use info::{
 };
 pub(crate) use info::{draw_focus_point, failed_pill, loupe_pill, rendering_overdue};
 use lens_blur::{lens_blur_brush_overlay, lens_blur_shape_overlay};
+use light_flare::light_flare_overlay;
 use look_ahead::BEHIND;
 pub use look_ahead::LookAhead;
 pub(crate) use look_ahead::{Prepare, look_ahead};
@@ -61,6 +63,8 @@ use window::{WindowCtx, WindowView, draw_window, request_window};
 /// An in-progress on-canvas gesture.
 #[derive(Clone, Debug)]
 pub enum Gesture {
+    /// Light Flare's light source, following the pointer (Place on Photo).
+    LightFlare,
     /// Lens Blur's fixed focus shape: moving it (`handle` 0) or stretching it sideways (1) or
     /// up and down (2), from `original` (where it was when the drag began).
     LensBlurArea {
@@ -768,6 +772,7 @@ fn tool_interaction(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Res
         RightPanel::RedEye => eye_overlay(app, ui, resp, map, d),
         RightPanel::Edit if app.ui.tool == "lensBlurShape" => lens_blur_shape_overlay(app, ui, resp, map, d),
         RightPanel::Edit if app.ui.tool.starts_with("lensBlur") => lens_blur_brush_overlay(app, ui, resp, map),
+        RightPanel::Edit if app.ui.tool == "lightFlare" => light_flare_overlay(app, ui, resp, map, d),
         _ => {
             // side by side / stacked: Before shows the same frame, so a click in its view (white
             // balance, colour samples, targeted adjustment) means the same point of the photo.

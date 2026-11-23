@@ -5,13 +5,13 @@
 //! requested size, and its histogram.
 //!
 //! Stage order (see `docs/pipeline.md`):
-//! 1. geometry — user orientation, lens corrections (distortion, CA, vignetting), perspective, crop +
+//! 1. geometry â€” user orientation, lens corrections (distortion, CA, vignetting), perspective, crop +
 //!    straighten, flips; one resample at output resolution; then defringe
-//! 2. scene-linear — white balance, exposure, dehaze, local tone (highlights/shadows), texture,
+//! 2. scene-linear â€” white balance, exposure, dehaze, local tone (highlights/shadows), texture,
 //!    clarity, local adjustments (masks)
-//! 3. tone map — contrast / whites / blacks filmic curve on luminance, highlight desaturation
-//! 4. colour — vibrance, saturation, colour mixer, colour grading, B&W (OkLCh)
-//! 5. display — gamut map to the output space (sRGB unless [`RenderRequest::space`] says otherwise), encode, tone curves (parametric + point), vignette, grain
+//! 3. tone map â€” contrast / whites / blacks filmic curve on luminance, highlight desaturation
+//! 4. colour â€” vibrance, saturation, colour mixer, colour grading, B&W (OkLCh)
+//! 5. display â€” gamut map to the output space (sRGB unless [`RenderRequest::space`] says otherwise), encode, tone curves (parametric + point), vignette, grain
 //!
 //! Spatial parameters are specified relative to the image's long edge, so a 400 px preview and a
 //! 60 MP export look alike.
@@ -31,6 +31,7 @@ pub mod cull;
 pub mod curve;
 pub mod dust;
 pub mod finish;
+pub mod flare;
 pub mod geometry;
 pub mod lens_blur;
 pub mod light_v3;
@@ -140,7 +141,7 @@ pub enum Quality {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RenderRequest {
-    /// Output must fit in `max_w × max_h` (aspect preserved).
+    /// Output must fit in `max_w Ã— max_h` (aspect preserved).
     pub max_w: usize,
     pub max_h: usize,
     /// The box is the final export size, already fitted against the full-resolution photo.
@@ -157,7 +158,7 @@ pub struct RenderRequest {
     pub depth: OutputDepth,
     /// Soft proofing (a proof against an output-device profile renders on the CPU; see [`Proof`]).
     pub proof: Option<Proof>,
-    /// Render only this window of the output that `max_w × max_h` describes (a zoomed view):
+    /// Render only this window of the output that `max_w Ã— max_h` describes (a zoomed view):
     /// the result is that window's pixels, as in the whole render. See [`PixelWindow`].
     pub window: Option<PixelWindow>,
     /// Previews for a monitor with a display profile: render 8-bit into its primaries instead of
@@ -166,9 +167,9 @@ pub struct RenderRequest {
 }
 
 /// A window of the (virtual) full output, in its pixels: what a zoomed view needs, rendered
-/// without materializing the whole frame. The output frame is the one `max_w × max_h` fits, after
+/// without materializing the whole frame. The output frame is the one `max_w Ã— max_h` fits, after
 /// crop, straighten and flips, as drawn. Out-of-range windows are clamped into it. Spatial stages
-/// (clarity, dehaze, sharpening…) read their neighbours, so ask for a margin around what is kept.
+/// (clarity, dehaze, sharpeningâ€¦) read their neighbours, so ask for a margin around what is kept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PixelWindow {
     pub x: usize,
@@ -178,7 +179,7 @@ pub struct PixelWindow {
 }
 
 impl PixelWindow {
-    /// This window inside a `full_w × full_h` frame: at least one pixel, wholly inside.
+    /// This window inside a `full_w Ã— full_h` frame: at least one pixel, wholly inside.
     pub fn clamped(self, full_w: usize, full_h: usize) -> PixelWindow {
         let (fw, fh) = (full_w.max(1), full_h.max(1));
         let x = self.x.min(fw - 1);
@@ -189,7 +190,7 @@ impl PixelWindow {
 
 /// The longest output side a render may be asked for (TIFF/PNG/JPEG all fit within it).
 pub const MAX_OUTPUT_SIDE: usize = 65_535;
-/// The most output pixels a render may be asked for (the box it fits into, ≈ 1.07 Gpx).
+/// The most output pixels a render may be asked for (the box it fits into, â‰ˆ 1.07 Gpx).
 pub const MAX_OUTPUT_PIXELS: usize = 1 << 30;
 
 /// Rejects an output box past [`MAX_OUTPUT_SIDE`] or [`MAX_OUTPUT_PIXELS`] before anything is
@@ -197,7 +198,7 @@ pub const MAX_OUTPUT_PIXELS: usize = 1 << 30;
 pub fn check_output_size(max_w: usize, max_h: usize) -> Result<(), String> {
     let pixels = max_w.checked_mul(max_h);
     if max_w > MAX_OUTPUT_SIDE || max_h > MAX_OUTPUT_SIDE || pixels.is_none_or(|n| n > MAX_OUTPUT_PIXELS) {
-        return Err(format!("output size {max_w}×{max_h} is too large (at most {MAX_OUTPUT_SIDE} px per side and {MAX_OUTPUT_PIXELS} pixels)"));
+        return Err(format!("output size {max_w}Ã—{max_h} is too large (at most {MAX_OUTPUT_SIDE} px per side and {MAX_OUTPUT_PIXELS} pixels)"));
     }
     Ok(())
 }
@@ -278,7 +279,7 @@ pub(crate) struct Prepared {
     /// Log luminance blurred at the sharpen radius (the pixel-scale band sharpening boosts).
     pub sharpen_blur: Option<Arc<Plane>>,
     pub dark: Option<Arc<Plane>>,
-    /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
+    /// Blurred chromaticity (`rgb / Y`) for local MoirÃ© / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,
     /// Airlight of `dark` (before exposure).
     pub air: f32,
@@ -287,12 +288,12 @@ pub(crate) struct Prepared {
     pub px_per_long: f64,
 }
 
-/// Output size for a source of `src_w × src_h` under `s`, fitting `max_w × max_h`.
+/// Output size for a source of `src_w Ã— src_h` under `s`, fitting `max_w Ã— max_h`.
 pub fn output_size(src_w: usize, src_h: usize, s: &DevelopSettings, req: &RenderRequest) -> (usize, usize) {
     req.size(&geometry::Frame::new(src_w, src_h, s, req.apply_crop))
 }
 
-/// Size of the cropped output of a `src_w × src_h` source under `s` at the source's own resolution
+/// Size of the cropped output of a `src_w Ã— src_h` source under `s` at the source's own resolution
 /// (what a full-size export produces).
 pub fn native_output_size(src_w: usize, src_h: usize, s: &DevelopSettings) -> (f64, f64) {
     geometry::Frame::new(src_w, src_h, s, true).native_size()
@@ -817,7 +818,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
 
 /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
 /// exposed scene colours, as [`MaskShape::ColorRange`](lightcraft_develop::MaskShape) compares
-/// them), averaged over 3 × 3 pixels of a render fitting `req`. `None` outside the image.
+/// them), averaged over 3 Ã— 3 pixels of a render fitting `req`. `None` outside the image.
 pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, p: lightcraft_geom::Point) -> Option<[f64; 3]> {
     // Pick from the same settings as the render: disabled panels contribute nothing, and an
     // SDR preview of an HDR edit includes the SDR rendition's exposure offset.
@@ -937,6 +938,8 @@ fn plan_preserves_matching_box_size() {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_flare;
 #[cfg(test)]
 mod tests_geometry;
 #[cfg(test)]

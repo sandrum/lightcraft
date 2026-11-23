@@ -1,5 +1,5 @@
-//! The Edit panel: histogram, Auto/B&W, profile, and the Light / Color / Effects / Detail / Optics
-//! sections, built from the engine's control specs.
+//! The Edit panel: histogram, Auto/B&W, profile, and the Light / Color / Effects / Detail / Optics /
+//! Lens Blur / Light Flare / Calibration sections, built from the engine's control specs.
 
 use egui::epaint::{Mesh, Vertex};
 use egui::{Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, pos2, vec2};
@@ -22,6 +22,7 @@ mod grading;
 mod hdr_flow;
 mod histogram;
 mod lens_blur;
+mod light_flare;
 mod mixer;
 mod sliders;
 
@@ -33,6 +34,7 @@ pub(crate) use grading::{WheelGrab, WheelLock, WheelMods, wheel_pick};
 pub(crate) use histogram::histogram;
 use histogram::soft_proofing;
 use lens_blur::lens_blur;
+use light_flare::light_flare;
 use mixer::{mixer, point_color};
 use sliders::{REL_TEMP, REL_TINT, hdr_row, header_buttons, k_to_rel, profile_menu, quick_develop, rel_to_k, reset_tip, section};
 pub use sliders::{apply_slider_out, sub_title};
@@ -380,6 +382,14 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         lens_blur(app, ui, d);
         ui.add_space(8.0);
     });
+    section(app, ui, &d, "lightFlare", "Light Flare", |app, ui, d| {
+        light_flare(app, ui, d);
+        ui.add_space(8.0);
+    });
+    // the light is placed on the photo only while its section is open
+    if app.ui.tool == light_flare::PLACE_TOOL && !app.ui.section_open("lightFlare") {
+        app.ui.tool.clear();
+    }
     // Lightroom Classic's Calibration panel (the cloud app hides it): last, like there.
     section(app, ui, &d, "calibration", "Calibration", |app, ui, d| {
         sub_title(ui, crate::i18n::tr("Shadows"));

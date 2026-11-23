@@ -249,6 +249,10 @@ pub struct UiState {
     /// Active on-canvas tool: "", "brush", "linear", "radial", "wbPicker", "straighten", "remove",
     /// "lensBlurFocus" / "lensBlurBlur" (Lens Blur Brush Refinement, in the Edit panel).
     pub tool: String,
+    /// The Light Flare the Edit section's controls and Place on Photo act on (its index in the photo's
+    /// flares): not an edit, so not saved.
+    #[serde(skip)]
+    pub flare_index: usize,
     /// Guided Upright: the selected guide (photo id + index) while the tool is open. A Delete /
     /// Backspace on it removes that guide alone; a click away or leaving the tool clears it.
     #[serde(skip)]
@@ -481,6 +485,7 @@ impl Default for UiState {
             grading_mode: "3way".into(),
             grading_hidden: None,
             tool: String::new(),
+            flare_index: 0,
             selected_guide: None,
             brush_size: 0.04,
             brush_feather: 50.0,

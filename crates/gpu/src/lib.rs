@@ -649,6 +649,10 @@ fn run(
         if s.spots.iter().any(|sp| sp.mode == lightcraft_develop::SpotMode::Fill) {
             return Err(Fallback::NotTried);
         }
+        // Light Flare has no GPU kernel yet: the CPU renders a photo with a flare
+        if s.light_flare.is_active() && s.section_enabled("lightFlare") {
+            return Err(Fallback::NotTried);
+        }
         // in flight until this returns; not tried once the process is ending (issue #620)
         let _work = exit::enter().ok_or(Fallback::NotTried)?;
         let gpu = device().ok_or(Fallback::NotTried)?;

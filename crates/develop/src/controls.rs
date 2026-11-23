@@ -2,7 +2,7 @@
 //! default, step, display precision and track style. The UI builds panels from it, MCP exposes it as
 //! a schema, and `get`/`set` address settings by id (e.g. `light.exposure`, `mixer.red.hue`).
 //!
-//! Settings that come in lists (Point Color samples) are *indexed* controls: one template spec in
+//! Settings that come in lists (Point Color samples, Light Flares) are *indexed* controls: one template spec in
 //! [`INDEXED`] (`pointColor.hueShift`) addresses every element as `pointColor.<i>.hueShift`.
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,7 @@ pub enum Section {
     PointColor,
     RedEye,
     LensBlur,
+    LightFlare,
 }
 
 impl Section {
@@ -51,6 +52,7 @@ impl Section {
             Section::PointColor => "Point Color",
             Section::RedEye => "Red Eye",
             Section::LensBlur => "Lens Blur",
+            Section::LightFlare => "Light Flare",
         }
     }
 }
@@ -304,6 +306,127 @@ controls! {
 /// Template specs of the indexed controls (`<family>.<field>`; addressed as `<family>.<i>.<field>`).
 pub static INDEXED: &[ControlSpec] = &[
     ControlSpec {
+        id: "lightFlare.x",
+        label: "Light X",
+        section: Section::LightFlare,
+        min: -1.0,
+        max: 2.0,
+        default: 0.3_f32 as f64,
+        step: 0.001,
+        decimals: 3,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.y",
+        label: "Light Y",
+        section: Section::LightFlare,
+        min: -1.0,
+        max: 2.0,
+        default: 0.3_f32 as f64,
+        step: 0.001,
+        decimals: 3,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.brightness",
+        label: "Brightness",
+        section: Section::LightFlare,
+        min: 0.0,
+        max: 3.0,
+        default: 1.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.scale",
+        label: "Scale",
+        section: Section::LightFlare,
+        min: 0.1,
+        max: 5.0,
+        default: 1.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.source",
+        label: "Source",
+        section: Section::LightFlare,
+        min: 0.1,
+        max: 3.0,
+        default: 1.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.artifacts",
+        label: "Artifacts",
+        section: Section::LightFlare,
+        min: 0.0,
+        max: 3.0,
+        default: 1.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.aspect",
+        label: "Aspect",
+        section: Section::LightFlare,
+        min: 0.25,
+        max: 4.0,
+        default: 1.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.rotation",
+        label: "Rotation",
+        section: Section::LightFlare,
+        min: -180.0,
+        max: 180.0,
+        default: 0.0,
+        step: 1.0,
+        decimals: 0,
+        track: Centered,
+    },
+    ControlSpec {
+        id: "lightFlare.hue",
+        label: "Hue",
+        section: Section::LightFlare,
+        min: 0.0,
+        max: 360.0,
+        default: 0.0,
+        step: 1.0,
+        decimals: 0,
+        track: Rainbow,
+    },
+    ControlSpec {
+        id: "lightFlare.tint",
+        label: "Tint",
+        section: Section::LightFlare,
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "lightFlare.textureOpacity",
+        label: "Texture Opacity",
+        section: Section::LightFlare,
+        min: 0.0,
+        max: 1.0,
+        default: 0.6_f32 as f64,
+        step: 0.01,
+        decimals: 2,
+        track: Plain,
+    },
+    ControlSpec {
         id: "pointColor.hueShift",
         label: "Hue",
         section: Section::PointColor,
@@ -458,6 +581,10 @@ fn indexed_get(s: &DevelopSettings, id: &str) -> Option<f64> {
     // one accessor for get and set: a copy of the one element read (never of the lists, which a
     // read of every indexed control would copy once per control)
     let (fam, i, field) = split_indexed(id)?;
+    if fam == "lightFlare" {
+        let mut f = s.light_flare.flares.get(i)?.clone();
+        return flare_field(&mut f, field).map(|v| f64::from(*v));
+    }
     let mut c = DevelopSettings::default();
     match fam {
         "pointColor" => c.point_colors.push(*s.point_colors.get(i)?),
@@ -467,7 +594,34 @@ fn indexed_get(s: &DevelopSettings, id: &str) -> Option<f64> {
     indexed_field(&mut c, &format!("{fam}.0.{field}")).map(|v| *v)
 }
 
+/// A Light Flare slider of one flare (`lightFlare.<i>.<field>`): its fields are `f32`.
+fn flare_field<'a>(f: &'a mut crate::flare::LensFlare, field: &str) -> Option<&'a mut f32> {
+    Some(match field {
+        "x" => &mut f.source.0,
+        "y" => &mut f.source.1,
+        "brightness" => &mut f.brightness,
+        "scale" => &mut f.scale,
+        "source" => &mut f.source_gain,
+        "artifacts" => &mut f.artifacts,
+        "aspect" => &mut f.aspect,
+        "rotation" => &mut f.rotation,
+        "hue" => &mut f.hue,
+        "tint" => &mut f.tint,
+        "textureOpacity" => &mut f.texture.opacity,
+        _ => return None,
+    })
+}
+
 fn indexed_set(s: &mut DevelopSettings, id: &str, v: f64) -> bool {
+    if let Some(("lightFlare", i, field)) = split_indexed(id) {
+        return match s.light_flare.flares.get_mut(i).and_then(|f| flare_field(f, field)) {
+            Some(f) => {
+                *f = v as f32;
+                true
+            }
+            None => false,
+        };
+    }
     match indexed_field(s, id) {
         Some(f) => {
             *f = v;
@@ -495,6 +649,7 @@ pub fn indexed_instances(s: &DevelopSettings) -> Vec<(String, &'static ControlSp
         let n = match fam {
             "pointColor" => s.point_colors.len(),
             "redEye" => s.red_eye.len(),
+            "lightFlare" => s.light_flare.flares.len(),
             _ => 0,
         };
         for i in 0..n {
@@ -561,7 +716,13 @@ mod tests {
         assert_eq!(find("pointColor.7.lumRange").map(|c| c.id), Some("pointColor.lumRange"));
         assert!(find("pointColor.x.lumRange").is_none() && find("pointColor.0.nope").is_none());
         let ids: Vec<String> = indexed_instances(&s).into_iter().map(|(id, _)| id).collect();
-        assert_eq!(ids.len(), 2 * INDEXED.iter().filter(|c| c.id.starts_with("pointColor.")).count());
+        let per = |fam: &str| INDEXED.iter().filter(|c| c.id.starts_with(fam)).count();
+        // two Point Color samples, and the one flare a photo has ready
+        assert_eq!(ids.len(), 2 * per("pointColor.") + per("lightFlare."));
+        // a flare's sliders (f32 fields) by index, clamped by the template
+        assert!(set(&mut s, "lightFlare.0.brightness", 9.0) && !set(&mut s, "lightFlare.1.brightness", 1.0));
+        assert_eq!(get(&s, "lightFlare.0.brightness"), Some(3.0));
+        assert_eq!(get(&s, "lightFlare.0.x"), Some(f64::from(0.3_f32)));
         for (id, spec) in indexed_instances(&s) {
             assert!(get(&s, &id).is_some(), "{id}");
             assert!(spec.min <= spec.default && spec.default <= spec.max);

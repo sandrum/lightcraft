@@ -2271,6 +2271,73 @@ fn lens_blur_focus_controls_follow_apply_and_the_shape_moves() {
     h.settle(SETTLE);
 }
 
+/// Light Flare: Apply puts down Place on Photo, so a click on the photo moves the light there and a
+/// drag carries it along (one undo step); closing the section or switching the flare off puts the
+/// tool down.
+#[test]
+fn light_flare_is_placed_with_a_click_or_a_drag_on_the_photo() {
+    let mut h = detail("panel.masking");
+    assert_eq!(h.request("ui.resize", json!({"width": 1200, "height": 1400}), T)["ok"], true);
+    let r = h.request("ui.set", json!({"right": "edit", "openSections": ["lightFlare"], "histogram": false}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    click(&mut h, "check:lightFlare.enabled");
+    assert!(develop(&h).light_flare.enabled);
+    assert_eq!(h.app.ui.tool, "lightFlare", "applying it lets the next click place the light");
+    pointer(&mut h, json!([{"kind": "down", "x": 0.7, "y": 0.2}, {"kind": "up", "x": 0.7, "y": 0.2}]));
+    let (x, y) = develop(&h).light_flare.flares[0].source;
+    assert!((x - 0.7).abs() < 0.02 && (y - 0.2).abs() < 0.02, "a click put the light there: {x}, {y}");
+    pointer(
+        &mut h,
+        json!([{"kind": "down", "x": 0.7, "y": 0.2}, {"kind": "drag", "x": 0.5, "y": 0.4}, {"kind": "drag", "x": 0.3, "y": 0.6}, {"kind": "up", "x": 0.3, "y": 0.6}]),
+    );
+    let (x, y) = develop(&h).light_flare.flares[0].source;
+    assert!((x - 0.3).abs() < 0.02 && (y - 0.6).abs() < 0.02, "a drag carried the light: {x}, {y}");
+    exec(&mut h, "edit.undo", json!({}));
+    let (x, y) = develop(&h).light_flare.flares[0].source;
+    assert!((x - 0.7).abs() < 0.02 && (y - 0.2).abs() < 0.02, "the drag is one undo step: {x}, {y}");
+    // the button puts the tool down and picks it up again
+    click(&mut h, "button:lightFlarePlace");
+    assert_eq!(h.app.ui.tool, "");
+    click(&mut h, "button:lightFlarePlace");
+    assert_eq!(h.app.ui.tool, "lightFlare");
+    // switching the flare off puts it down
+    click(&mut h, "check:lightFlare.enabled");
+    assert_eq!(h.app.ui.tool, "");
+    h.settle(SETTLE);
+}
+
+/// Several flares: Add puts a second one down where the next click goes; a click on the first's
+/// marker selects it (without moving it), and the sliders and Place on Photo then act on it.
+#[test]
+fn a_second_light_flare_is_added_and_each_is_placed_on_its_own() {
+    let mut h = detail("panel.masking");
+    assert_eq!(h.request("ui.resize", json!({"width": 1200, "height": 1400}), T)["ok"], true);
+    let r = h.request("ui.set", json!({"right": "edit", "openSections": ["lightFlare"], "histogram": false}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    click(&mut h, "check:lightFlare.enabled");
+    pointer(&mut h, json!([{"kind": "down", "x": 0.2, "y": 0.3}, {"kind": "up", "x": 0.2, "y": 0.3}]));
+    click(&mut h, "button:lightFlareAdd");
+    assert_eq!((develop(&h).light_flare.flares.len(), h.app.ui.flare_index), (2, 1));
+    pointer(&mut h, json!([{"kind": "down", "x": 0.8, "y": 0.6}, {"kind": "up", "x": 0.8, "y": 0.6}]));
+    let f = develop(&h).light_flare.flares;
+    let near = |(x, y): (f32, f32), (a, b): (f32, f32)| (x - a).abs() < 0.02 && (y - b).abs() < 0.02;
+    assert!(near(f[0].source, (0.2, 0.3)) && near(f[1].source, (0.8, 0.6)), "{:?} {:?}", f[0].source, f[1].source);
+    // a click on the first flare's marker selects it and leaves both lights where they are
+    pointer(&mut h, json!([{"kind": "down", "x": 0.2, "y": 0.3}, {"kind": "up", "x": 0.2, "y": 0.3}]));
+    assert_eq!(h.app.ui.flare_index, 0);
+    let g = develop(&h).light_flare.flares;
+    assert!(near(g[0].source, (0.2, 0.3)) && near(g[1].source, (0.8, 0.6)));
+    // and the next click moves it, not the second
+    pointer(&mut h, json!([{"kind": "down", "x": 0.5, "y": 0.8}, {"kind": "up", "x": 0.5, "y": 0.8}]));
+    let g = develop(&h).light_flare.flares;
+    assert!(near(g[0].source, (0.5, 0.8)) && near(g[1].source, (0.8, 0.6)));
+    // Remove takes the selected flare away
+    click(&mut h, "button:lightFlareRemove");
+    let g = develop(&h).light_flare.flares;
+    assert!(g.len() == 1 && near(g[0].source, (0.8, 0.6)));
+    h.settle(SETTLE);
+}
+
 /// A mask's Lens Blur is a block of its own under the mask's sliders: which side it blurs, its
 /// sliders, an eye that switches it off (its controls then inert) and a header that folds it.
 #[test]

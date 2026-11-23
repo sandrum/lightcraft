@@ -41,11 +41,12 @@ pub enum SettingsGroup {
     Spots,
     RedEye,
     LensBlur,
+    LightFlare,
     Calibration,
 }
 
 impl SettingsGroup {
-    pub const ALL: [SettingsGroup; 20] = [
+    pub const ALL: [SettingsGroup; 21] = [
         SettingsGroup::Profile,
         SettingsGroup::Treatment,
         SettingsGroup::WhiteBalance,
@@ -65,6 +66,7 @@ impl SettingsGroup {
         SettingsGroup::Spots,
         SettingsGroup::RedEye,
         SettingsGroup::LensBlur,
+        SettingsGroup::LightFlare,
         SettingsGroup::Calibration,
     ];
 
@@ -97,6 +99,7 @@ impl SettingsGroup {
             SettingsGroup::Spots => "Remove",
             SettingsGroup::RedEye => "Red Eye",
             SettingsGroup::LensBlur => "Lens Blur",
+            SettingsGroup::LightFlare => "Light Flare",
             SettingsGroup::Calibration => "Calibration",
         }
     }
@@ -123,6 +126,7 @@ impl SettingsGroup {
             SettingsGroup::Spots => &["spots"],
             SettingsGroup::RedEye => &["red_eye"],
             SettingsGroup::LensBlur => &["lens_blur"],
+            SettingsGroup::LightFlare => &["light_flare"],
             SettingsGroup::Calibration => &["calibration"],
         }
     }

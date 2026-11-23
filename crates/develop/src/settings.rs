@@ -6,6 +6,8 @@
 use lightcraft_geom::{CropGeometry, Homography, Orientation, Point};
 use serde::{Deserialize, Serialize};
 
+pub use crate::flare::LightFlare;
+
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// The rendering process a photo's settings are interpreted by (what Lightroom calls the process
@@ -167,6 +169,10 @@ pub struct DevelopSettings {
     /// Red eye corrections; the first [`MAX_RED_EYES`] render.
     pub red_eye: Vec<RedEye>,
     pub lens_blur: LensBlur,
+    /// Light Flare: a lens flare screened over the finished photo. Not written while it is the default (off and
+    /// untouched), so settings without a flare keep their JSON and `hash64`.
+    #[serde(skip_serializing_if = "LightFlare::is_default")]
+    pub light_flare: LightFlare,
     pub enhance: Enhance,
     /// Camera calibration: shadows tint and primary hue/saturation (applied before tone mapping).
     pub calibration: Calibration,
@@ -202,6 +208,7 @@ impl Default for DevelopSettings {
             spots: Vec::new(),
             red_eye: Vec::new(),
             lens_blur: LensBlur::default(),
+            light_flare: LightFlare::default(),
             enhance: Enhance::default(),
             calibration: Calibration::default(),
             disabled_sections: Vec::new(),
