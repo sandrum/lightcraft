@@ -65,6 +65,9 @@ use window::{WindowCtx, WindowView, draw_window, request_window};
 pub enum Gesture {
     /// Light Flare's light source, following the pointer (Place on Photo).
     LightFlare,
+    /// Light Flare's centre point (the axis its ghosts line up on), following the pointer: Alt, or a
+    /// press on its diamond.
+    LightFlareCenter,
     /// Lens Blur's fixed focus shape: moving it (`handle` 0) or stretching it sideways (1) or
     /// up and down (2), from `original` (where it was when the drag began).
     LensBlurArea {

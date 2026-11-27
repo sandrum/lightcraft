@@ -202,8 +202,8 @@ pub enum FlareElement {
         #[serde(default)]
         arc: f32,
     },
-    /// A ghost image of the iris on the axis at `t` (0 = the source, 1 = the frame centre, 2 = the
-    /// mirror point). `sides` 0 = round, else a polygon; `rim` brightens its edge; `softness`
+    /// A ghost image of the iris on the axis at `t` (0 = the source, 1 = the flare's centre point,
+    /// the frame centre by default; 2 = as far again). `sides` 0 = round, else a polygon; `rim` brightens its edge; `softness`
     /// blurs it (`0..=1`).
     Ghost { t: f32, radius: f32, intensity: f32, color: [f32; 3], sides: u32, rim: f32, softness: f32, chroma: f32 },
     /// Edge light: a broad soft wash that pours in from the frame edge past the source, as when
@@ -223,7 +223,54 @@ pub enum FlareElement {
     },
 }
 
+/// The kinds of part a flare is made of, in the order the Parts group's Add menu lists them: id (as
+/// the element's `kind` serializes) and label.
+pub const PART_KINDS: [(&str, &str); 7] =
+    [("glow", "Glow"), ("streak", "Streak"), ("star", "Star"), ("rays", "Rays"), ("ring", "Ring"), ("ghost", "Ghost"), ("wash", "Edge Wash")];
+
 impl FlareElement {
+    /// A new part of kind `id` (one of [`PART_KINDS`]) with middling settings: on the light, or half
+    /// way to the centre point for a ghost.
+    pub fn new_part(id: &str) -> Option<FlareElement> {
+        const WARM: [f32; 3] = [1.0, 0.85, 0.65];
+        Some(match id {
+            "glow" => glow(60.0, 0.6, WARM),
+            "streak" => streak(600.0, 3.0, 0.4, [0.55, 0.7, 1.0]),
+            "star" => star(6, 200.0, 1.2, 0.3, WHITE, 0.0),
+            "rays" => rays(60, 180.0, 0.2, WARM, 7),
+            "ring" => ring_at(0.0, 160.0, 10.0, 0.12, [0.7, 0.85, 1.0], 0.8),
+            "ghost" => ghost(0.5, 30.0, 0.15, [0.6, 0.8, 1.0]),
+            "wash" => wash(450.0, 40.0, 0.3, WARM, 0.4),
+            _ => return None,
+        })
+    }
+
+    /// The kind's id in [`PART_KINDS`].
+    pub fn kind_id(&self) -> &'static str {
+        match self {
+            FlareElement::Glow { .. } => "glow",
+            FlareElement::Streak { .. } => "streak",
+            FlareElement::Star { .. } => "star",
+            FlareElement::Rays { .. } => "rays",
+            FlareElement::Ring { .. } => "ring",
+            FlareElement::Ghost { .. } => "ghost",
+            FlareElement::Wash { .. } => "wash",
+        }
+    }
+
+    /// The part's colour.
+    pub fn color_mut(&mut self) -> &mut [f32; 3] {
+        match self {
+            FlareElement::Glow { color, .. }
+            | FlareElement::Streak { color, .. }
+            | FlareElement::Star { color, .. }
+            | FlareElement::Rays { color, .. }
+            | FlareElement::Ring { color, .. }
+            | FlareElement::Ghost { color, .. }
+            | FlareElement::Wash { color, .. } => color,
+        }
+    }
+
     /// Whether the element sits at the light source (sized by Source) rather than being a lens
     /// artifact along the axis (scaled by Artifacts).
     pub fn at_source(&self) -> bool {
@@ -249,6 +296,11 @@ pub mod range {
     pub const ROTATION: (f32, f32) = (-180.0, 180.0);
     pub const HUE: (f32, f32) = (0.0, 360.0);
     pub const TINT: (f32, f32) = (0.0, 1.0);
+    pub const SPREAD: (f32, f32) = (0.2, 3.0);
+    pub const SATURATION: (f32, f32) = (0.0, 2.0);
+    pub const SOURCE_BRIGHTNESS: (f32, f32) = (0.0, 2.0);
+    pub const SOFTNESS: (f32, f32) = (0.0, 1.0);
+    pub const FRINGE: (f32, f32) = (-1.0, 1.0);
     /// Position, as a fraction of the canvas; a source may sit outside the frame.
     pub const POSITION: (f32, f32) = (-1.0, 2.0);
     /// Most elements a flare may hold (bounds per-pixel work for hand-written files).
@@ -285,6 +337,28 @@ pub struct LensFlare {
     /// preset's own colours).
     pub hue: f32,
     pub tint: f32,
+    /// How far the light spreads: a tone curve on the flare's light (`1` = as the parts make it;
+    /// lower keeps only the hot core, higher lifts the faint halo and ghosts).
+    pub spread: f32,
+    /// Colour saturation of the flare (`0` = white light, its parts' rainbow edges included; `1` =
+    /// its own colours; `2` = stronger).
+    pub saturation: f32,
+    /// Strength of the light at the source (glow, streaks, star, rays, wash): `0` leaves only the
+    /// lens artifacts. (Source, `source_gain`, sets its size.)
+    pub source_brightness: f32,
+    /// Softening of the whole flare (`0` = as made, `1` = soft): thin lines thicken, edges blur.
+    pub softness: f32,
+    /// Colour fringing (`-1..1`, `0` = none): the light's red and blue separate, red outward for a
+    /// positive value, inward for a negative one.
+    pub fringe: f32,
+    /// The point the lens axis runs through from the light, as a fraction of the frame: ghosts and
+    /// rings off the light sit on that line at their `t` (1 = this point, 2 = as far again). The
+    /// frame centre unless the user moves it.
+    pub center: (f32, f32),
+    /// The parts (elements) hidden from the render, bit `i` for `elements[i]`, their settings kept.
+    /// Not written while every part shows.
+    #[serde(skip_serializing_if = "no_bits")]
+    pub hidden_parts: u64,
     #[serde(default)]
     pub texture: FlareTexture,
     /// Hidden from the render (its eye in the flare list), its settings kept. Not written while
@@ -294,7 +368,48 @@ pub struct LensFlare {
     pub elements: Vec<FlareElement>,
 }
 
+fn no_bits(v: &u64) -> bool {
+    *v == 0
+}
+
 impl LensFlare {
+    /// Whether part `i` is hidden from the render.
+    pub fn is_part_hidden(&self, i: usize) -> bool {
+        i < 64 && self.hidden_parts & (1 << i) != 0
+    }
+
+    /// Shows or hides part `i`.
+    pub fn set_part_hidden(&mut self, i: usize, hidden: bool) {
+        if i < 64 {
+            if hidden {
+                self.hidden_parts |= 1 << i;
+            } else {
+                self.hidden_parts &= !(1 << i);
+            }
+        }
+    }
+
+    /// Mirrors the flare across the frame's vertical centre line (`horizontal`) or its horizontal
+    /// one: the light and the centre point move to the mirrored places, the rotation and every
+    /// part's own angle turn the other way, and the texture flips with it.
+    pub fn mirror(&mut self, horizontal: bool) {
+        if horizontal {
+            self.source.0 = 1.0 - self.source.0;
+            self.center.0 = 1.0 - self.center.0;
+            self.texture.flip_x = !self.texture.flip_x;
+        } else {
+            self.source.1 = 1.0 - self.source.1;
+            self.center.1 = 1.0 - self.center.1;
+            self.texture.flip_y = !self.texture.flip_y;
+        }
+        self.rotation = -self.rotation;
+        for e in &mut self.elements {
+            if let FlareElement::Streak { angle, .. } | FlareElement::Star { angle, .. } | FlareElement::Wash { angle, .. } = e {
+                *angle = -*angle;
+            }
+        }
+    }
+
     /// A flare with the default controls around `elements`.
     pub fn new(category: FlareCategory, preset: impl Into<String>, elements: Vec<FlareElement>) -> LensFlare {
         LensFlare {
@@ -309,6 +424,13 @@ impl LensFlare {
             rotation: 0.0,
             hue: 0.0,
             tint: 0.0,
+            spread: 1.0,
+            saturation: 1.0,
+            source_brightness: 1.0,
+            softness: 0.0,
+            fringe: 0.0,
+            center: (0.5, 0.5),
+            hidden_parts: 0,
             texture: FlareTexture::default(),
             hidden: false,
             elements,
@@ -331,7 +453,15 @@ impl LensFlare {
         self.hue = fix(self.hue.rem_euclid(360.0), range::HUE, 0.0);
         self.tint = fix(self.tint, range::TINT, 0.0);
         self.texture.opacity = fix(self.texture.opacity, (0.0, 1.0), 0.6);
+        self.spread = fix(self.spread, range::SPREAD, 1.0);
+        self.saturation = fix(self.saturation, range::SATURATION, 1.0);
+        self.source_brightness = fix(self.source_brightness, range::SOURCE_BRIGHTNESS, 1.0);
+        self.softness = fix(self.softness, range::SOFTNESS, 0.0);
+        self.fringe = fix(self.fringe, range::FRINGE, 0.0);
+        self.center = (fix(self.center.0, range::POSITION, 0.5), fix(self.center.1, range::POSITION, 0.5));
         self.elements.truncate(range::MAX_ELEMENTS);
+        // only bits for parts the flare has
+        self.hidden_parts &= if self.elements.len() >= 64 { u64::MAX } else { (1u64 << self.elements.len()) - 1 };
         self
     }
 }
@@ -1317,6 +1447,40 @@ mod tests {
     }
 
     /// A sidecar or preset from outside renders safely: its flares are brought into range.
+    #[test]
+    fn a_flare_mirrors_and_its_hidden_parts_stay_within_its_parts() {
+        let mut f = preset("Six Blades").unwrap().flare();
+        f.source = (0.2, 0.3);
+        f.rotation = 30.0;
+        let angles = |f: &LensFlare| {
+            f.elements
+                .iter()
+                .filter_map(|e| match e {
+                    FlareElement::Streak { angle, .. } | FlareElement::Star { angle, .. } | FlareElement::Wash { angle, .. } => Some(*angle),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = f.clone();
+        f.mirror(true);
+        assert!((f.source.0 - 0.8).abs() < 1e-6 && f.source.1 == 0.3 && f.rotation == -30.0 && f.texture.flip_x);
+        assert_eq!(angles(&f), angles(&before).iter().map(|a| -a).collect::<Vec<_>>());
+        f.mirror(true);
+        assert!((f.source.0 - 0.2).abs() < 1e-6 && f.rotation == 30.0 && !f.texture.flip_x);
+        // every kind can be added; bits past the parts (a hand-edited file) are dropped
+        let mut g = LensFlare::new(FlareCategory::Spherical, "x", PART_KINDS.iter().map(|(id, _)| FlareElement::new_part(id).unwrap()).collect());
+        assert!(g.elements.iter().zip(PART_KINDS).all(|(e, (id, _))| e.kind_id() == id));
+        g.hidden_parts = u64::MAX;
+        let g = g.sanitized();
+        assert_eq!(g.hidden_parts.count_ones() as usize, PART_KINDS.len());
+        // older settings, without the new fields, read with the defaults
+        let old: LensFlare = serde_json::from_str(r#"{"preset":"Blue Horizon","source":[0.3,0.3]}"#).unwrap();
+        assert_eq!(
+            (old.center, old.spread, old.saturation, old.source_brightness, old.softness, old.fringe, old.hidden_parts),
+            ((0.5, 0.5), 1.0, 1.0, 1.0, 0.0, 0.0, 0)
+        );
+    }
+
     #[test]
     fn untrusted_settings_bring_the_flares_into_range() {
         let hostile = serde_json::json!({"category": "streak", "preset": "x", "source": [9.0, -9.0], "scale": 1e9, "brightness": -3.0,

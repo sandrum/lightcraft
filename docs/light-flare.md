@@ -18,15 +18,35 @@ paste (the Light Flare group), presets, sync, versions, history and Before / Aft
   delete it. **Add Flare** puts another flare down (at a free spot, selected, ready to be placed),
   the bin deletes the selected one, and the count shows how many of the 8 are used. On the photo,
   every flare's light has a numbered marker (the selected one larger): a press on another marker
-  selects that flare and drags it.
+  selects that flare and drags it. The selected flare's **center point** (where the line its ghosts
+  and rings line up on runs through from the light; the frame centre unless moved) shows as a diamond
+  with that line drawn through it: drag the diamond, or Alt-click / Alt-drag anywhere on the photo, to
+  move it.
 - **Preset** picks a preset from the library: Anamorphic, Spherical, Sun Flares and Streaks, 24 each
   (all original designs). A new preset keeps the light's position, the sliders and the texture.
 - Brightness, Scale and Source (size of the light at the source) are always shown. The rest are in
   groups that stay folded until their title is clicked (the choice is kept), each showing what it is
-  set to: **Shape** (Artifacts: strength of the ghosts and rings along the axis; Aspect: horizontal
-  stretch of the source's glow; Rotation), **Color** (Hue, and Tint: how far the flare's colours move
-  towards the hue) and **Texture** (lens dirt or film grain the flare's light shows up on, its
-  opacity and Flip Horizontal / Flip Vertical).
+  set to:
+  - **Light**: Spread (a tone curve on the flare's light: below 1 only the hot core is left, above 1
+    the faint halo and ghosts spread further) and Source Brightness (strength of the light at the
+    source: 0 leaves only the lens artifacts).
+  - **Shape**: Artifacts (strength of the ghosts and rings along the axis), Aspect (horizontal stretch
+    of the source's glow: above 1 the wide anamorphic band, below 1 a tall oval), Rotation, Softness
+    (thin lines thicken and edges blur), Color Fringe (red and blue part about the light, the sign
+    choosing which goes outward), and **Flip Horizontal** / **Flip Vertical**, which mirror the whole
+    flare: its light and center point, its rotation and every part's own angle, and its texture.
+  - **Color**: Saturation (0 = white light, rainbow edges included; 2 = stronger), Hue, and Tint (how
+    far the flare's colours move towards the hue).
+  - **Texture**: lens dirt or film grain the flare's light shows up on, its opacity and Flip
+    Horizontal / Flip Vertical of the texture.
+  - **Parts**: the flare's own parts (Glow, Streak, Star, Rays, Ring, Ghost, Edge Wash), numbered,
+    with where a ring or ghost sits on the axis (`Ghost at 0.70`: 0 = the light, 1 = the center
+    point, 2 = as far again). A click selects a part; its eye hides it without losing its settings.
+    **Add Part** (a menu of the kinds), **Duplicate**, **Delete**, **Move Up** / **Move Down** (the
+    order is only the list's), the center point and **Reset Center**; then the selected part's own
+    sliders (Brightness, Size, Length, Thickness, Angle, Points, Count, Variation, Position, Radius,
+    Width, Rainbow Edge, Half Ring, Sides, Rim, Softness, Reach…, as its kind has them) and its
+    **Color**. Each change is one undo step (a slider drag, or a change in the colour picker, too).
 - The section's eye switches the flares off without losing them.
 
 ## How it renders
@@ -50,7 +70,8 @@ photo renders at CPU speed.
 - The sliders are indexed controls, `lightFlare.<i>.<field>` for flare `i` (as Point Color's):
   `develop.set {control: "lightFlare.0.x", value}` with fields `x`, `y` (position as a fraction of the
   cropped frame, −1…2: the light may sit outside it), `brightness`, `scale`, `source`, `artifacts`,
-  `aspect`, `rotation`, `hue`, `tint`, `textureOpacity`.
+  `aspect`, `rotation`, `hue`, `tint`, `textureOpacity`, `spread`, `saturation`, `sourceBrightness`,
+  `softness`, `fringe`, `centerX`, `centerY`.
 - `develop.merge {settings: {light_flare: {enabled: true}}}` applies the flares.
 - `lightFlare.add {preset?, x?, y?}` → `{index}`: another flare (at most 8); on a photo without flares,
   its first.
@@ -60,15 +81,26 @@ photo renders at CPU speed.
 - `lightFlare.preset {preset, index?}`: the preset's elements for flare `index` (default 0), keeping its
   position and controls; applies the flares.
 - `lightFlare.texture {index?, texture?, flipX?, flipY?}`: `"none"` removes the texture.
+- `lightFlare.part {index?, part?, action, kind?, values?}` → `{part}`: flare `index`'s parts;
+  `action` is `add` (`kind`: glow, streak, star, rays, ring, ghost, wash), `duplicate`, `remove`,
+  `up`, `down`, `show`, `hide` or `set` (`values`: the part's own fields as `elements` stores them,
+  and `color: [r, g, b]`). Hidden marks follow their parts through every change of order.
+- `lightFlare.flip {index?, axis: "horizontal"|"vertical"}`: mirrors the whole flare.
 - `lightFlare.presets {category?}`: the library and the textures.
 - `section.lightFlare` (Cmd+7) opens the section; `ui.pointer` on the photo places the light while
   the Place on Photo tool (`ui.tool` `"lightFlare"`) is on; the markers are `lightFlare:light:<i>`; the
   list's rows are `lightFlareRow:<i>`, their eyes `lightFlareVisible:<i>`, then `button:lightFlareAdd`
-  and `icon:lightFlareRemove`; the groups' titles are `lightFlareGroup:shape|color|texture`.
+  and `icon:lightFlareRemove`; the groups' titles are `lightFlareGroup:light|shape|color|texture|parts`;
+  the center point's diamond is `lightFlare:center` (Alt with `ui.pointer` moves it); the parts are
+  `lightFlarePart:<k>` with eyes `lightFlarePartVisible:<k>`, then `button:lightFlarePartAdd` (its
+  menu `lightFlarePartAdd:<kind>`), `button:lightFlarePartDuplicate`, `…Remove`, `…Up`, `…Down`,
+  `button:lightFlareCenterReset` and `lightFlarePartColor`.
 
 ## Catalog
 
 Catalog format 14 added `DevelopSettings.light_flare` (`{enabled, flares: [...]}`; a flare's
-`hidden` is written only while it is hidden). It is not written
+`hidden` is written only while it is hidden, and `hiddenParts`, a bit per part, only while a part is;
+settings saved before the center point and the Light / Shape / Color additions read with their
+defaults). It is not written
 while the section is off and untouched, so photos without flares keep their stored settings and
 cached previews. A single `flare` object, as the section's first builds wrote, reads as a list of one.

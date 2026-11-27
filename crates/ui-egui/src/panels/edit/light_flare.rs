@@ -1,13 +1,16 @@
 //! The Light Flare section: Apply and Place on Photo; the photo's flares as a list (one row each:
 //! its number, its preset, an eye that hides it; Add Flare and Delete under it); then the selected
-//! flare's preset and main sliders, and its Shape, Color and Texture groups, folded until opened.
+//! flare's preset and main sliders, and its Light, Shape, Color, Texture and Parts groups, folded
+//! until opened. Parts lists the flare's own parts (glows, streaks, ghosts…) to show, hide, add,
+//! copy, delete, reorder and tune one by one, and the centre point its ghosts line up through.
 
 use super::{LightcraftApp, Tokens, control, register, text_button};
 use crate::icons::{Icon, paint};
 use crate::widgets::{announce_disclosure, announce_selected, icon_button, one_line};
 use egui::{Align2, Rect, Sense, Stroke, pos2, vec2};
 use lightcraft_develop::DevelopSettings;
-use lightcraft_develop::flare::{FlareCategory, LensFlare, MAX_FLARES, TextureKind, presets};
+use lightcraft_develop::flare::{FlareCategory, LensFlare, MAX_FLARES, PART_KINDS, TextureKind, presets, range};
+use lightcraft_develop::{ControlSpec, Section, Track};
 use serde_json::json;
 
 /// The tool that places the light with a click or drag on the photo (`panels/detail/light_flare.rs`).
@@ -38,18 +41,29 @@ pub(super) fn light_flare(app: &mut LightcraftApp, ui: &mut egui::Ui, d: &Develo
     for c in ["brightness", "scale", "source"] {
         control(app, ui, d, &format!("lightFlare.{i}.{c}"), on);
     }
-    if group(app, ui, "shape", "Shape", "") {
-        for c in ["artifacts", "aspect", "rotation"] {
+    if group(app, ui, "light", "Light", "") {
+        for c in ["spread", "sourceBrightness"] {
             control(app, ui, d, &format!("lightFlare.{i}.{c}"), on);
         }
     }
+    if group(app, ui, "shape", "Shape", "") {
+        for c in ["artifacts", "aspect", "rotation", "softness", "fringe"] {
+            control(app, ui, d, &format!("lightFlare.{i}.{c}"), on);
+        }
+        flips(app, ui, i, on);
+    }
     let colour = if f.tint > 0.0 { crate::i18n::tr_format!("Hue {h}°", h = f.hue.round()) } else { crate::i18n::tr("Preset colours").to_string() };
     if group(app, ui, "color", "Color", &colour) {
+        control(app, ui, d, &format!("lightFlare.{i}.saturation"), on);
         control(app, ui, d, &format!("lightFlare.{i}.hue"), on);
         control(app, ui, d, &format!("lightFlare.{i}.tint"), on);
     }
     if group(app, ui, "texture", "Texture", crate::i18n::tr(f.texture.kind.label())) {
         texture(app, ui, d, i, f, on);
+    }
+    let summary = crate::i18n::tr_format!("{n} parts", n = f.elements.len());
+    if group(app, ui, "parts", "Parts", &summary) {
+        parts(app, ui, i, f, on);
     }
     ui.add_space(6.0);
 }
@@ -317,5 +331,261 @@ fn preset_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, index: usize, current
     if let Some(name) = pick {
         let _ = app.run("lightFlare.preset", json!({"preset": name, "index": index}));
         ui.close();
+    }
+}
+
+/// Flip Horizontal and Flip Vertical: the whole flare mirrored (`lightFlare.flip`).
+fn flips(app: &mut LightcraftApp, ui: &mut egui::Ui, i: usize, on: bool) {
+    egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 2, bottom: 6 }).show(ui, |ui| {
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal(|ui| {
+                for (id, label, axis) in [("lightFlareFlipH", "Flip Horizontal", "horizontal"), ("lightFlareFlipV", "Flip Vertical", "vertical")] {
+                    let r = text_button(ui, id, label, false)
+                        .on_hover_text(crate::i18n::tr("Mirror the whole flare: its light, center point and angles"));
+                    if r.clicked() {
+                        let _ = app.run("lightFlare.flip", json!({"index": i, "axis": axis}));
+                    }
+                }
+            });
+        });
+    });
+}
+
+/// A part's label in the list: its number and kind, and for a part off the light where it sits on
+/// the axis (0 = the light, 1 = the centre point).
+fn part_label(k: usize, e: &lightcraft_develop::flare::FlareElement) -> String {
+    let id = e.kind_id();
+    let name = crate::i18n::tr(PART_KINDS.iter().find(|(k, _)| *k == id).map_or(id, |(_, l)| *l));
+    let t = serde_json::to_value(e).ok().and_then(|v| v.get("t").and_then(serde_json::Value::as_f64)).unwrap_or(0.0);
+    if matches!(id, "ring" | "ghost") && t.abs() > 1e-3 {
+        crate::i18n::tr_format!("{n}. {name} at {t}", n = k + 1, name = name, t = format!("{t:.2}"))
+    } else {
+        format!("{}. {name}", k + 1)
+    }
+}
+
+const fn part_spec(id: &'static str, label: &'static str, min: f64, max: f64, step: f64, decimals: u8) -> ControlSpec {
+    ControlSpec { id, label, section: Section::LightFlare, min, max, default: min, step, decimals, track: Track::Plain }
+}
+
+/// The settings of a part of `kind`: the field each sets, and its slider. Sizes are thousandths of the
+/// frame's diagonal before the flare's Scale; Position is along the axis.
+fn part_settings(kind: &str) -> &'static [(&'static str, ControlSpec)] {
+    const B: ControlSpec = part_spec("lightFlarePart.intensity", "Brightness", 0.0, 2.0, 0.01, 2);
+    const T: ControlSpec = part_spec("lightFlarePart.t", "Position", -1.0, 3.0, 0.01, 2);
+    const C: ControlSpec = part_spec("lightFlarePart.chroma", "Rainbow Edge", 0.0, 2.0, 0.01, 2);
+    const A: ControlSpec = part_spec("lightFlarePart.angle", "Angle", -180.0, 180.0, 1.0, 0);
+    const GLOW: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("radius", part_spec("lightFlarePart.glow.radius", "Size", 1.0, 400.0, 1.0, 0)),
+        ("falloff", part_spec("lightFlarePart.falloff", "Falloff", 1.0, 2.0, 0.01, 2)),
+    ];
+    const STREAK: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("length", part_spec("lightFlarePart.streak.length", "Length", 10.0, 2500.0, 1.0, 0)),
+        ("thickness", part_spec("lightFlarePart.streak.thickness", "Thickness", 0.2, 60.0, 0.1, 1)),
+        ("angle", A),
+    ];
+    const STAR: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("rays", part_spec("lightFlarePart.rays", "Points", 2.0, 32.0, 1.0, 0)),
+        ("length", part_spec("lightFlarePart.star.length", "Length", 10.0, 600.0, 1.0, 0)),
+        ("thickness", part_spec("lightFlarePart.star.thickness", "Thickness", 0.2, 10.0, 0.1, 1)),
+        ("angle", A),
+    ];
+    const RAYS: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("count", part_spec("lightFlarePart.count", "Count", 1.0, 256.0, 1.0, 0)),
+        ("length", part_spec("lightFlarePart.rays.length", "Length", 10.0, 600.0, 1.0, 0)),
+        ("seed", part_spec("lightFlarePart.seed", "Variation", 0.0, 999.0, 1.0, 0)),
+    ];
+    const RING: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("t", T),
+        ("radius", part_spec("lightFlarePart.ring.radius", "Radius", 5.0, 600.0, 1.0, 0)),
+        ("width", part_spec("lightFlarePart.width", "Width", 0.5, 80.0, 0.1, 1)),
+        ("chroma", C),
+        ("arc", part_spec("lightFlarePart.arc", "Half Ring", 0.0, 1.0, 0.01, 2)),
+    ];
+    const GHOST: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("t", T),
+        ("radius", part_spec("lightFlarePart.ghost.radius", "Radius", 1.0, 300.0, 1.0, 0)),
+        ("sides", part_spec("lightFlarePart.sides", "Sides", 0.0, 12.0, 1.0, 0)),
+        ("rim", part_spec("lightFlarePart.rim", "Rim", 0.0, 2.0, 0.01, 2)),
+        ("softness", part_spec("lightFlarePart.softness", "Softness", 0.02, 1.0, 0.01, 2)),
+        ("chroma", C),
+    ];
+    const WASH: &[(&str, ControlSpec)] = &[
+        ("intensity", B),
+        ("reach", part_spec("lightFlarePart.reach", "Reach", 50.0, 1000.0, 1.0, 0)),
+        ("spread", part_spec("lightFlarePart.wash.spread", "Width", 1.0, 180.0, 1.0, 0)),
+        ("chroma", C),
+        ("angle", A),
+    ];
+    match kind {
+        "glow" => GLOW,
+        "streak" => STREAK,
+        "star" => STAR,
+        "rays" => RAYS,
+        "ring" => RING,
+        "ghost" => GHOST,
+        "wash" => WASH,
+        _ => &[],
+    }
+}
+
+/// The Parts group: the selected flare's parts as rows (a click selects one, its eye hides it), the
+/// buttons that add, copy, delete and reorder them, the centre point, and the selected part's sliders
+/// and colour. Each change is one `lightFlare.part` command (a slider drag, one step).
+fn parts(app: &mut LightcraftApp, ui: &mut egui::Ui, i: usize, f: &LensFlare, on: bool) {
+    let t = Tokens::get(ui.ctx());
+    let n = f.elements.len();
+    if n > 0 && app.ui.flare_part >= n {
+        app.ui.flare_part = n - 1;
+    }
+    let sel = app.ui.flare_part;
+    let part = |app: &mut LightcraftApp, action: &str, k: usize| {
+        if let Ok(v) = app.run("lightFlare.part", json!({"index": i, "part": k, "action": action}))
+            && let Some(k) = v.get("part").and_then(serde_json::Value::as_u64)
+        {
+            app.ui.flare_part = k as usize;
+        }
+    };
+    egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 2, bottom: 4 }).show(ui, |ui| {
+        ui.add_enabled_ui(on, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for (k, e) in f.elements.iter().enumerate() {
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+                let resp = ui.interact(r, egui::Id::unique(("lightFlarePart", i, k)), Sense::click());
+                let label = part_label(k, e);
+                announce_selected(&resp, label.clone(), k == sel);
+                register(ui, format!("lightFlarePart:{k}"), r);
+                let shown = !f.is_part_hidden(k);
+                let p = ui.painter();
+                let fill = if k == sel {
+                    t.tool_active
+                } else if resp.hovered() {
+                    t.hover.gamma_multiply(0.7)
+                } else {
+                    t.inset
+                };
+                p.rect_filled(r, 4.0, fill);
+                if k == sel {
+                    p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 1.5, t.accent);
+                }
+                if resp.has_focus() {
+                    p.rect_stroke(r, 4.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+                }
+                let ink = if shown { t.text } else { t.text_disabled };
+                let g = one_line(p, &label, t.font(12.5), ink, r.width() - 12.0 - 30.0);
+                p.galley(pos2(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, ink);
+                // show / hide: always there, struck through while hidden
+                let er = Rect::from_center_size(pos2(r.right() - 14.0, r.center().y), vec2(20.0, 20.0));
+                let eye = ui.interact(er, egui::Id::unique(("lightFlarePartVisible", i, k)), Sense::click());
+                announce_selected(&eye, crate::i18n::tr_format!("Show part {n}", n = k + 1), shown);
+                register(ui, format!("lightFlarePartVisible:{k}"), er);
+                let eye = eye.on_hover_text(crate::i18n::tr(if shown { "Hide this part" } else { "Show this part" }));
+                paint(ui.painter(), er.shrink(2.0), if shown { Icon::Eye } else { Icon::EyeOff }, if eye.hovered() { t.text } else { t.text_dim });
+                if eye.clicked() {
+                    part(app, if shown { "hide" } else { "show" }, k);
+                }
+                if resp.clicked() || resp.gained_focus() {
+                    app.ui.flare_part = k;
+                }
+            }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let add = ui.add_enabled_ui(n < range::MAX_ELEMENTS, |ui| text_button(ui, "lightFlarePartAdd", "Add Part", false)).inner;
+                egui::Popup::menu(&add).show(|ui| {
+                    ui.set_min_width(150.0);
+                    for (id, name) in PART_KINDS {
+                        let item = ui.selectable_label(false, crate::i18n::tr(name));
+                        register(ui, format!("lightFlarePartAdd:{id}"), item.rect);
+                        if item.clicked() {
+                            if let Ok(v) = app.run("lightFlare.part", json!({"index": i, "action": "add", "kind": id}))
+                                && let Some(k) = v.get("part").and_then(serde_json::Value::as_u64)
+                            {
+                                app.ui.flare_part = k as usize;
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+                for (id, label, action, enabled) in [
+                    ("lightFlarePartDuplicate", "Duplicate", "duplicate", n > 0 && n < range::MAX_ELEMENTS),
+                    ("lightFlarePartRemove", "Delete", "remove", n > 0),
+                ] {
+                    if ui.add_enabled_ui(enabled, |ui| text_button(ui, id, label, false)).inner.clicked() {
+                        part(app, action, sel);
+                    }
+                }
+            });
+            // the list's order (the light adds up the same in any order)
+            ui.horizontal(|ui| {
+                for (id, label, action, enabled) in
+                    [("lightFlarePartUp", "Move Up", "up", sel > 0), ("lightFlarePartDown", "Move Down", "down", sel + 1 < n)]
+                {
+                    if ui.add_enabled_ui(enabled, |ui| text_button(ui, id, label, false)).inner.clicked() {
+                        part(app, action, sel);
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            // the centre point the ghosts line up through (Alt on the photo moves it)
+            ui.horizontal(|ui| {
+                let (cx, cy) = f.center;
+                ui.label(
+                    egui::RichText::new(crate::i18n::tr_format!("Center point {x}, {y}", x = format!("{cx:.2}"), y = format!("{cy:.2}")))
+                        .font(t.font(12.5))
+                        .color(t.text_dim),
+                );
+                let off = (cx - 0.5).abs() > 1e-4 || (cy - 0.5).abs() > 1e-4;
+                if ui.add_enabled_ui(off, |ui| text_button(ui, "lightFlareCenterReset", "Reset Center", false)).inner.clicked() {
+                    let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Center"}));
+                    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.centerX"), "value": 0.5}));
+                    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.centerY"), "value": 0.5}));
+                    let _ = app.run("develop.endInteraction", json!({}));
+                }
+            });
+        });
+    });
+    let Some(e) = f.elements.get(sel) else { return };
+    let v = serde_json::to_value(e).unwrap_or_default();
+    super::sub_title(ui, &part_label(sel, e));
+    for (key, spec) in part_settings(e.kind_id()) {
+        let value = v.get(*key).and_then(serde_json::Value::as_f64).unwrap_or(spec.min);
+        let out = crate::widgets::slider(ui, spec, value, on, None);
+        super::apply_slider_out(app, spec, out, |app, x| {
+            app.run("lightFlare.part", json!({"index": i, "part": sel, "action": "set", "values": {*key: x}}))
+        });
+    }
+    part_colour(app, ui, i, sel, e, on);
+}
+
+/// The selected part's colour button: a change in the picker is one undo step.
+fn part_colour(app: &mut LightcraftApp, ui: &mut egui::Ui, i: usize, k: usize, e: &lightcraft_develop::flare::FlareElement, on: bool) {
+    let t = Tokens::get(ui.ctx());
+    let mut rgb = e.clone().color_mut().map(|c| c.clamp(0.0, 1.0));
+    let before = rgb;
+    egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 4, bottom: 6 }).show(ui, |ui| {
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(crate::i18n::tr("Color")).font(t.font(13.0)).color(t.text_dim));
+                let r = ui.color_edit_button_rgb(&mut rgb);
+                register(ui, "lightFlarePartColor", r.rect);
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ColorWell, true, crate::i18n::tr("Part Color")));
+            });
+        });
+    });
+    if rgb != before {
+        if !app.ui.flare_colour_editing {
+            let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Part Color"}));
+            app.ui.flare_colour_editing = true;
+        }
+        let _ = app.run("lightFlare.part", json!({"index": i, "part": k, "action": "set", "values": {"color": rgb}}));
+    } else if app.ui.flare_colour_editing && !ui.input(|inp| inp.pointer.any_down()) {
+        app.ui.flare_colour_editing = false;
+        let _ = app.run("develop.endInteraction", json!({}));
     }
 }

@@ -783,6 +783,142 @@ pub fn specs() -> Vec<CommandSpec> {
                 })
             }
         ),
+        cmd!(
+            "lightFlare.part",
+            "Light Flare Part",
+            [],
+            None,
+            "{index?: number, part?: number, action: \"add\"|\"duplicate\"|\"remove\"|\"up\"|\"down\"|\"show\"|\"hide\"|\"set\", kind?: \"glow\"|\"streak\"|\"star\"|\"rays\"|\"ring\"|\"ghost\"|\"wash\" (add), values?: {field: number, color?: [r, g, b]} (set: the part's own fields, as `elements` stores them)} — edits flare `index`'s (default 0) parts → {part} (the part the edit leaves selected)",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.part";
+                use lightcraft_develop::flare::{FlareElement, range};
+                let i = flare_index(p, C)?;
+                let action = str_param(p, "action")
+                    .ok_or_else(|| bad(C, "missing `action` (add, duplicate, remove, up, down, show, hide or set)"))?
+                    .to_string();
+                let part = match p.get("part") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(v.as_u64().map(|v| v as usize).ok_or_else(|| bad(C, "`part` is a part index"))?),
+                };
+                let kind = str_param(p, "kind").map(str::to_string);
+                let values = p.get("values").cloned();
+                let mut selected = 0usize;
+                edit(s, C, "Light Flare Part", |d| {
+                    let n = d.light_flare.flares.len();
+                    let f = d.light_flare.flares.get_mut(i).ok_or_else(|| bad(C, format!("no light flare {i} (the photo has {n})")))?;
+                    let count = f.elements.len();
+                    let need = |part: Option<usize>| part.filter(|k| *k < count).ok_or_else(|| bad(C, format!("`part` must be below {count}")));
+                    let room = || {
+                        if count < range::MAX_ELEMENTS { Ok(()) } else { Err(bad(C, format!("a flare holds at most {} parts", range::MAX_ELEMENTS))) }
+                    };
+                    // hidden marks follow their parts through every change of order
+                    let bits = |f: &lightcraft_develop::flare::LensFlare| (0..f.elements.len()).map(|k| f.is_part_hidden(k)).collect::<Vec<_>>();
+                    let set_bits = |f: &mut lightcraft_develop::flare::LensFlare, b: &[bool]| {
+                        f.hidden_parts = 0;
+                        for (k, h) in b.iter().enumerate() {
+                            f.set_part_hidden(k, *h);
+                        }
+                    };
+                    match action.as_str() {
+                        "add" => {
+                            room()?;
+                            let k = kind.as_deref().unwrap_or("glow");
+                            let e = FlareElement::new_part(k).ok_or_else(|| bad(C, format!("no part kind \"{k}\"")))?;
+                            f.elements.push(e);
+                            selected = f.elements.len() - 1;
+                        }
+                        "duplicate" => {
+                            room()?;
+                            let k = need(part)?;
+                            let mut b = bits(f);
+                            f.elements.insert(k + 1, f.elements[k].clone());
+                            b.insert(k + 1, false);
+                            set_bits(f, &b);
+                            selected = k + 1;
+                        }
+                        "remove" => {
+                            let k = need(part)?;
+                            let mut b = bits(f);
+                            f.elements.remove(k);
+                            b.remove(k);
+                            set_bits(f, &b);
+                            selected = k.saturating_sub(1);
+                        }
+                        "up" | "down" => {
+                            let k = need(part)?;
+                            let j = if action == "up" { k.checked_sub(1) } else { Some(k + 1).filter(|j| *j < count) };
+                            let j = j.ok_or_else(|| bad(C, "the part is already at that end of the list"))?;
+                            let mut b = bits(f);
+                            f.elements.swap(k, j);
+                            b.swap(k, j);
+                            set_bits(f, &b);
+                            selected = j;
+                        }
+                        "show" | "hide" => {
+                            let k = need(part)?;
+                            f.set_part_hidden(k, action == "hide");
+                            selected = k;
+                        }
+                        "set" => {
+                            let k = need(part)?;
+                            let values =
+                                values.as_ref().and_then(Value::as_object).ok_or_else(|| bad(C, "`values` is an object of the part's fields"))?;
+                            let mut v = serde_json::to_value(&f.elements[k]).map_err(|e| bad(C, e.to_string()))?;
+                            let obj = v.as_object_mut().ok_or_else(|| bad(C, "a part is an object"))?;
+                            for (key, val) in values {
+                                let old = obj.get(key).ok_or_else(|| bad(C, format!("a {} has no `{key}`", f.elements[k].kind_id())))?;
+                                let fresh = match (old, val) {
+                                    (Value::Array(_), Value::Array(c))
+                                        if key == "color" && c.len() == 3 && c.iter().all(|x| x.as_f64().is_some_and(f64::is_finite)) =>
+                                    {
+                                        json!(c.iter().map(|x| x.as_f64().unwrap_or(0.0).clamp(0.0, 1.0)).collect::<Vec<_>>())
+                                    }
+                                    (o, Value::Number(x)) if o.is_u64() => json!(
+                                        x.as_f64()
+                                            .filter(|x| x.is_finite() && *x >= 0.0)
+                                            .ok_or_else(|| bad(C, format!("`{key}` is a whole number")))?
+                                            .round() as u64
+                                    ),
+                                    (o, Value::Number(x)) if o.is_number() => {
+                                        json!(x.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad(C, format!("`{key}` is a number")))?)
+                                    }
+                                    _ => return Err(bad(C, format!("`{key}` has the wrong type"))),
+                                };
+                                obj.insert(key.clone(), fresh);
+                            }
+                            f.elements[k] = serde_json::from_value(v).map_err(|e| bad(C, e.to_string()))?;
+                            selected = k;
+                        }
+                        other => return Err(bad(C, format!("no part action \"{other}\""))),
+                    }
+                    Ok(())
+                })?;
+                Ok(json!({"part": selected}))
+            }
+        ),
+        cmd!(
+            "lightFlare.flip",
+            "Flip Light Flare",
+            [],
+            None,
+            "{index?: number, axis: \"horizontal\"|\"vertical\"} — mirrors flare `index` (default 0): its light and centre point move to the mirrored places, the rotation and every part's angle turn the other way, the texture flips",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.flip";
+                let i = flare_index(p, C)?;
+                let horizontal = match str_param(p, "axis") {
+                    Some("horizontal") => true,
+                    Some("vertical") => false,
+                    _ => return Err(bad(C, "`axis` is \"horizontal\" or \"vertical\"")),
+                };
+                edit(s, C, "Flip Light Flare", |d| {
+                    let n = d.light_flare.flares.len();
+                    d.light_flare.flares.get_mut(i).ok_or_else(|| bad(C, format!("no light flare {i} (the photo has {n})")))?.mirror(horizontal);
+                    Ok(())
+                })
+            }
+        ),
         cmd!(query "lightFlare.presets", "Light Flare Presets", [], None, "{category?: \"anamorphic\"|\"spherical\"|\"sunFlare\"|\"streak\"} — the preset library and the textures", always, |_, p| {
             use lightcraft_develop::flare::{FlareCategory, TextureKind, presets};
             let only = str_param(p, "category");

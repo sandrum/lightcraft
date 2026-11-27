@@ -253,6 +253,12 @@ pub struct UiState {
     /// flares): not an edit, so not saved.
     #[serde(skip)]
     pub flare_index: usize,
+    /// The part of the selected flare the Parts group edits.
+    #[serde(skip)]
+    pub flare_part: usize,
+    /// A part's colour is being changed in its colour picker (one undo step for the whole change).
+    #[serde(skip)]
+    pub flare_colour_editing: bool,
     /// The Light Flare section's groups (`shape`, `color`, `texture`) unfolded; the others are folded.
     pub flare_groups_open: Vec<String>,
     /// Guided Upright: the selected guide (photo id + index) while the tool is open. A Delete /
@@ -488,6 +494,8 @@ impl Default for UiState {
             grading_hidden: None,
             tool: String::new(),
             flare_index: 0,
+            flare_part: 0,
+            flare_colour_editing: false,
             flare_groups_open: Vec::new(),
             selected_guide: None,
             brush_size: 0.04,

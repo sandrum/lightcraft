@@ -1,6 +1,8 @@
 //! Light Flare on the photo (Place on Photo): a marker at every flare's light, the selected one
-//! highlighted. A press on another flare's marker selects that flare and drags it; a press anywhere
-//! else moves the selected flare's light there. One click or drag is one undo step.
+//! highlighted, and the selected flare's centre point as a diamond with the axis its ghosts line up
+//! on. A press on another flare's marker selects that flare and drags it; a press on the diamond, or
+//! anywhere with Alt held, moves the centre point; a press anywhere else moves the selected flare's
+//! light there. One click or drag is one undo step.
 
 use super::geometry::CanvasMap;
 use super::{Color32, DevelopSettings, Gesture, LightcraftApp, Pos2, Rect, Stroke, json, register, vec2};
@@ -17,10 +19,22 @@ fn frame_fraction(map: &CanvasMap, q: Pos2) -> [f64; 2] {
     [f(q.x, r.left(), r.width()), f(q.y, r.top(), r.height())]
 }
 
-/// Flare `i`'s light moves to `at` (both coordinates in the step the interaction makes).
-fn place(app: &mut LightcraftApp, i: usize, at: [f64; 2]) {
-    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.x"), "value": at[0]}));
-    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.y"), "value": at[1]}));
+/// Flare `i`'s light (or with `center` its centre point) moves to `at` (both coordinates in the
+/// step the interaction makes).
+fn place(app: &mut LightcraftApp, i: usize, at: [f64; 2], center: bool) {
+    let (x, y) = if center { ("centerX", "centerY") } else { ("x", "y") };
+    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.{x}"), "value": at[0]}));
+    let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.{y}"), "value": at[1]}));
+}
+
+/// The centre point's marker: a keylined diamond, and the axis from the light through it.
+fn center_marker(p: &egui::Painter, light: Pos2, c: Pos2) {
+    let mirror = c + (c - light);
+    p.line_segment([light, mirror], Stroke::new(1.0, Color32::from_white_alpha(90)));
+    let d = 7.0;
+    let pts = vec![c + vec2(0.0, -d), c + vec2(d, 0.0), c + vec2(0.0, d), c + vec2(-d, 0.0)];
+    p.add(egui::Shape::closed_line(pts.clone(), Stroke::new(3.5, Color32::from_black_alpha(150))));
+    p.add(egui::Shape::closed_line(pts, Stroke::new(1.5, Color32::from_white_alpha(240))));
 }
 
 /// The marker at a light: a ring with a cross and the flare's number (as in the section's list),
@@ -56,6 +70,10 @@ pub(super) fn light_flare_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, re
     }
     let selected = app.ui.flare_index.min(lights.len() - 1);
     let p = ui.painter_at(app.canvas_rect.unwrap_or(r));
+    let center =
+        d.light_flare.flares.get(selected).map_or(r.center(), |f| Pos2::new(r.left() + f.center.0 * r.width(), r.top() + f.center.1 * r.height()));
+    center_marker(&p, lights[selected], center);
+    register(ui, "lightFlare:center", Rect::from_center_size(center, vec2(18.0, 18.0)));
     let font = crate::theme::Tokens::get(ui.ctx()).semibold(12.0);
     // the selected one last, on top
     for (k, c) in lights.iter().enumerate().filter(|(k, _)| *k != selected).chain(std::iter::once((selected, &lights[selected]))) {
@@ -77,36 +95,57 @@ pub(super) fn light_flare_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, re
             .min_by(|a, b| a.1.distance(q).total_cmp(&b.1.distance(q)))
             .map_or(selected, |(k, _)| k)
     };
+    // the centre point takes a press on its diamond (unless it is on a light marker), or any with Alt
+    let alt = ui.input(|i| i.modifiers.alt);
+    let on_center = |q: Pos2| alt || (center.distance(q) <= GRAB && lights.iter().all(|l| l.distance(q) > GRAB));
     if resp.drag_started()
         && let Some(q) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
     {
-        let k = target(q);
-        app.ui.flare_index = k;
-        let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Position"}));
-        app.gesture = Some(Gesture::LightFlare);
-        // grabbing a marker keeps the light where it is until the pointer moves; elsewhere it jumps there
-        if lights[k].distance(q) > GRAB {
-            place(app, k, frame_fraction(map, q));
+        if on_center(q) {
+            let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Center"}));
+            app.gesture = Some(Gesture::LightFlareCenter);
+            if alt {
+                place(app, selected, frame_fraction(map, q), true);
+            }
+        } else {
+            let k = target(q);
+            app.ui.flare_index = k;
+            let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Position"}));
+            app.gesture = Some(Gesture::LightFlare);
+            // grabbing a marker keeps the light where it is until the pointer moves; elsewhere it jumps there
+            if lights[k].distance(q) > GRAB {
+                place(app, k, frame_fraction(map, q), false);
+            }
         }
     } else if resp.clicked()
         && let Some(q) = resp.interact_pointer_pos()
     {
-        let k = target(q);
-        app.ui.flare_index = k;
-        // a click on a marker only selects that flare
-        if lights[k].distance(q) > GRAB {
-            let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Position"}));
-            place(app, k, frame_fraction(map, q));
-            let _ = app.run("develop.endInteraction", json!({}));
+        if on_center(q) {
+            // Alt-click puts the centre point there; a click on the diamond leaves it be
+            if alt {
+                let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Center"}));
+                place(app, selected, frame_fraction(map, q), true);
+                let _ = app.run("develop.endInteraction", json!({}));
+            }
+        } else {
+            let k = target(q);
+            app.ui.flare_index = k;
+            // a click on a marker only selects that flare
+            if lights[k].distance(q) > GRAB {
+                let _ = app.run("develop.beginInteraction", json!({"label": "Light Flare Position"}));
+                place(app, k, frame_fraction(map, q), false);
+                let _ = app.run("develop.endInteraction", json!({}));
+            }
         }
     }
+    let dragging_center = matches!(app.gesture, Some(Gesture::LightFlareCenter));
     if resp.dragged()
-        && matches!(app.gesture, Some(Gesture::LightFlare))
+        && (dragging_center || matches!(app.gesture, Some(Gesture::LightFlare)))
         && let Some(q) = resp.interact_pointer_pos()
     {
-        place(app, app.ui.flare_index, frame_fraction(map, q));
+        place(app, app.ui.flare_index, frame_fraction(map, q), dragging_center);
     }
-    if resp.drag_stopped() && matches!(app.gesture, Some(Gesture::LightFlare)) {
+    if resp.drag_stopped() && matches!(app.gesture, Some(Gesture::LightFlare | Gesture::LightFlareCenter)) {
         app.gesture = None;
         let _ = app.run("develop.endInteraction", json!({}));
     }

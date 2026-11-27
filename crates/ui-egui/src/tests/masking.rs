@@ -2378,6 +2378,46 @@ fn the_flare_list_selects_hides_and_folds() {
     }
 }
 
+/// The Parts group lists the selected flare's parts: a click selects one (its sliders follow), its
+/// eye hides it, Add Part adds one of a kind, and Alt-click on the photo moves the centre point while
+/// the light stays.
+#[test]
+fn light_flare_parts_are_edited_and_alt_moves_the_centre_point() {
+    let mut h = detail("panel.masking");
+    assert_eq!(h.request("ui.resize", json!({"width": 1200, "height": 2400}), T)["ok"], true);
+    let r = h.request("ui.set", json!({"right": "edit", "openSections": ["lightFlare"], "histogram": false}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    click(&mut h, "check:lightFlare.enabled");
+    pointer(&mut h, json!([{"kind": "down", "x": 0.2, "y": 0.3}, {"kind": "up", "x": 0.2, "y": 0.3}]));
+    click(&mut h, "lightFlareGroup:parts");
+    let n = develop(&h).light_flare.flares[0].elements.len();
+    assert!(n >= 2);
+    click(&mut h, "lightFlarePart:1");
+    assert_eq!(h.app.ui.flare_part, 1, "a click on a row selects its part");
+    click(&mut h, "lightFlarePartVisible:1");
+    let f = &develop(&h).light_flare.flares[0];
+    assert!(f.is_part_hidden(1) && !f.is_part_hidden(0), "its eye hides that part only");
+    click(&mut h, "button:lightFlarePartAdd");
+    click(&mut h, "lightFlarePartAdd:ghost");
+    let f = &develop(&h).light_flare.flares[0];
+    assert_eq!((f.elements.len(), f.elements[n].kind_id(), h.app.ui.flare_part), (n + 1, "ghost", n), "the new ghost is selected");
+    // Alt-click on the photo: the centre point goes there, the light stays
+    let r = h.request("ui.pointer", json!({"events": [{"kind": "down", "x": 0.7, "y": 0.6}, {"kind": "up", "x": 0.7, "y": 0.6}], "alt": true}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    let f = &develop(&h).light_flare.flares[0];
+    let near = |(x, y): (f32, f32), (a, b): (f32, f32)| (x - a).abs() < 0.02 && (y - b).abs() < 0.02;
+    assert!(near(f.center, (0.7, 0.6)) && near(f.source, (0.2, 0.3)), "{:?} {:?}", f.center, f.source);
+    h.settle(SETTLE);
+    if let Some(p) = std::env::var_os("LIGHTCRAFT_TEST_SHOTS") {
+        h.app.services.png = Some(Box::new(|img: &lightcraft_raster::Rgba8| {
+            lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(img), &lightcraft_codecs::EncodeMeta::default()).unwrap_or_default()
+        }));
+        h.app.services.write_new = Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string())));
+        let r = h.request("ui.screenshot", json!({"path": std::path::Path::new(&p).join("flare-parts.png").to_string_lossy(), "headless": true}), T);
+        assert_eq!(r["ok"], true, "{r}");
+    }
+}
+
 /// A mask's Lens Blur is a block of its own under the mask's sliders: which side it blurs, its
 /// sliders, an eye that switches it off (its controls then inert) and a header that folds it.
 #[test]

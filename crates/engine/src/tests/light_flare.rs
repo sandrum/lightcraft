@@ -105,3 +105,58 @@ fn a_hidden_flare_keeps_its_settings_and_stops_rendering() {
     assert!(flare(&s, id).is_active());
     assert!(s.execute("lightFlare.visible", &json!({"index": 1})).is_err());
 }
+
+#[test]
+fn a_flares_parts_are_added_copied_moved_hidden_set_and_removed() {
+    let mut s = Session::with_demo();
+    let id = s.active().unwrap();
+    s.execute("lightFlare.add", &json!({"preset": "Bare Bulb"})).unwrap();
+    let n = flare(&s, id).flares[0].elements.len();
+    let r = s.execute("lightFlare.part", &json!({"action": "add", "kind": "ghost"})).unwrap();
+    assert_eq!(r["part"], n);
+    s.execute("lightFlare.part", &json!({"action": "hide", "part": n})).unwrap();
+    s.execute("lightFlare.part", &json!({"action": "duplicate", "part": n})).unwrap();
+    let f = &flare(&s, id).flares[0];
+    assert!(f.elements.len() == n + 2 && f.is_part_hidden(n) && !f.is_part_hidden(n + 1), "the copy shows");
+    // moving a hidden part up carries its mark
+    let r = s.execute("lightFlare.part", &json!({"action": "up", "part": n})).unwrap();
+    assert_eq!(r["part"], n - 1);
+    assert!(flare(&s, id).flares[0].is_part_hidden(n - 1));
+    // set: a number, a whole number and the colour, one undo step
+    s.execute("lightFlare.part", &json!({"action": "set", "part": n + 1, "values": {"radius": 55.5, "sides": 6.4, "color": [1.0, 0.5, 2.0]}}))
+        .unwrap();
+    let v = serde_json::to_value(&flare(&s, id).flares[0].elements[n + 1]).unwrap();
+    assert_eq!((v["radius"].as_f64(), v["sides"].as_u64(), v["color"][2].as_f64()), (Some(55.5), Some(6), Some(1.0)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_ne!(serde_json::to_value(&flare(&s, id).flares[0].elements[n + 1]).unwrap()["radius"], 55.5);
+    // wrong fields, kinds and indices change nothing
+    for bad in [
+        json!({"action": "set", "part": 0, "values": {"wings": 2}}),
+        json!({"action": "set", "part": 0, "values": {"radius": "big"}}),
+        json!({"action": "add", "kind": "comet"}),
+        json!({"action": "remove", "part": 99}),
+        json!({"action": "explode", "part": 0}),
+    ] {
+        assert!(s.execute("lightFlare.part", &bad).is_err(), "{bad}");
+    }
+    s.execute("lightFlare.part", &json!({"action": "remove", "part": n - 1})).unwrap();
+    let f = &flare(&s, id).flares[0];
+    assert!(f.elements.len() == n + 1 && (0..f.elements.len()).all(|k| !f.is_part_hidden(k)), "the hidden part went with its mark");
+}
+
+#[test]
+fn a_flare_flips_and_its_centre_point_and_new_sliders_are_controls() {
+    let mut s = Session::with_demo();
+    let id = s.active().unwrap();
+    s.execute("lightFlare.add", &json!({"x": 0.2, "y": 0.3})).unwrap();
+    for (c, v) in
+        [("centerX", 0.7), ("centerY", 0.6), ("spread", 1.8), ("saturation", 0.4), ("sourceBrightness", 0.5), ("softness", 0.3), ("fringe", -0.5)]
+    {
+        s.execute("develop.set", &json!({"control": format!("lightFlare.0.{c}"), "value": v})).unwrap();
+    }
+    s.execute("lightFlare.flip", &json!({"axis": "horizontal"})).unwrap();
+    let f = &flare(&s, id).flares[0];
+    assert!((f.source.0 - 0.8).abs() < 1e-6 && (f.center.0 - 0.3).abs() < 1e-6 && f.center.1 == 0.6 && f.texture.flip_x);
+    assert_eq!((f.spread, f.saturation, f.source_brightness, f.softness, f.fringe), (1.8, 0.4, 0.5, 0.3, -0.5));
+    assert!(s.execute("lightFlare.flip", &json!({"axis": "diagonal"})).is_err());
+}
