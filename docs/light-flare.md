@@ -11,16 +11,22 @@ paste (the Light Flare group), presets, sync, versions, history and Before / Aft
 - **Apply** turns the flares on. **Place on Photo** comes on too, so the next click on the photo puts
   the selected flare's light there; a drag carries it along (one undo step). The button puts the tool
   down and picks it up again; closing the section or switching the flares off puts it down.
-- **Flares** lists the photo's flares as numbered buttons: the selected one is what the controls below
-  and Place on Photo act on. **Add** puts another flare down (at a free spot, selected, ready to be
-  placed); **Remove** takes the selected one away. On the photo every flare's light has a marker (the
-  selected one larger): a press on another marker selects that flare and drags it.
-- **Flare** picks a preset from the library: Anamorphic, Spherical, Sun Flares and Streaks, 24 each
+- The flare list has a row per flare: its number (the same number shows next to its marker on the
+  photo) and its preset. A click on a row selects that flare, and so does Tab or ↑ / ↓ in the list;
+  the selected row is marked by a bar on its left as well as its fill. The row's eye (on hover, and
+  always while hidden) hides that flare without losing it; right-click a row to show, hide or
+  delete it. **Add Flare** puts another flare down (at a free spot, selected, ready to be placed),
+  the bin deletes the selected one, and the count shows how many of the 8 are used. On the photo,
+  every flare's light has a numbered marker (the selected one larger): a press on another marker
+  selects that flare and drags it.
+- **Preset** picks a preset from the library: Anamorphic, Spherical, Sun Flares and Streaks, 24 each
   (all original designs). A new preset keeps the light's position, the sliders and the texture.
-- Sliders: Brightness, Scale, Source (size of the light at the source), Artifacts (strength of the
-  ghosts and rings along the axis), Aspect (horizontal stretch of the source's glow), Rotation; Color:
-  Hue and Tint (how far the flare's colours move towards the hue); Texture: lens dirt or film grain the
-  flare's light shows up on, its opacity and Flip Horizontal / Flip Vertical.
+- Brightness, Scale and Source (size of the light at the source) are always shown. The rest are in
+  groups that stay folded until their title is clicked (the choice is kept), each showing what it is
+  set to: **Shape** (Artifacts: strength of the ghosts and rings along the axis; Aspect: horizontal
+  stretch of the source's glow; Rotation), **Color** (Hue, and Tint: how far the flare's colours move
+  towards the hue) and **Texture** (lens dirt or film grain the flare's light shows up on, its
+  opacity and Flip Horizontal / Flip Vertical).
 - The section's eye switches the flares off without losing them.
 
 ## How it renders
@@ -49,16 +55,20 @@ photo renders at CPU speed.
 - `lightFlare.add {preset?, x?, y?}` → `{index}`: another flare (at most 8); on a photo without flares,
   its first.
 - `lightFlare.remove {index}`.
+- `lightFlare.visible {index, visible?}` → `{index, visible}`: shows or hides that flare (no
+  `visible`: toggles); a hidden flare keeps its settings and renders nothing.
 - `lightFlare.preset {preset, index?}`: the preset's elements for flare `index` (default 0), keeping its
   position and controls; applies the flares.
 - `lightFlare.texture {index?, texture?, flipX?, flipY?}`: `"none"` removes the texture.
 - `lightFlare.presets {category?}`: the library and the textures.
 - `section.lightFlare` (Cmd+7) opens the section; `ui.pointer` on the photo places the light while
-  the Place on Photo tool (`ui.tool` `"lightFlare"`) is on; the markers are `lightFlare:light:<i>`, the
-  flare buttons `button:lightFlareSelect:<i>`, `button:lightFlareAdd` and `button:lightFlareRemove`.
+  the Place on Photo tool (`ui.tool` `"lightFlare"`) is on; the markers are `lightFlare:light:<i>`; the
+  list's rows are `lightFlareRow:<i>`, their eyes `lightFlareVisible:<i>`, then `button:lightFlareAdd`
+  and `icon:lightFlareRemove`; the groups' titles are `lightFlareGroup:shape|color|texture`.
 
 ## Catalog
 
-Catalog format 14 added `DevelopSettings.light_flare` (`{enabled, flares: [...]}`). It is not written
+Catalog format 14 added `DevelopSettings.light_flare` (`{enabled, flares: [...]}`; a flare's
+`hidden` is written only while it is hidden). It is not written
 while the section is off and untouched, so photos without flares keep their stored settings and
 cached previews. A single `flare` object, as the section's first builds wrote, reads as a list of one.

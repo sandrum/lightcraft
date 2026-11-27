@@ -698,6 +698,28 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!(
+            "lightFlare.visible",
+            "Show / Hide Light Flare",
+            [],
+            None,
+            "{index: number, visible?: bool} — shows or hides that flare (default: toggles), its settings kept → {index, visible}",
+            has_active,
+            |s, p| {
+                const C: &str = "lightFlare.visible";
+                let i = index_req(p, "index", C)?;
+                let want = p.get("visible").and_then(Value::as_bool);
+                let mut shown = false;
+                edit(s, C, "Show / Hide Light Flare", |d| {
+                    let n = d.light_flare.flares.len();
+                    let f = d.light_flare.flares.get_mut(i).ok_or_else(|| bad(C, format!("no light flare {i} (the photo has {n})")))?;
+                    f.hidden = !want.unwrap_or(f.hidden);
+                    shown = !f.hidden;
+                    Ok(())
+                })?;
+                Ok(json!({"index": i, "visible": shown}))
+            }
+        ),
+        cmd!(
             "lightFlare.preset",
             "Light Flare Preset",
             [],

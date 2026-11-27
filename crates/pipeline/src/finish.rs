@@ -269,7 +269,7 @@ impl FinishParams {
             let canvas = crate::flare::PxRect::new(0, 0, view[2].round() as i32, view[3].round() as i32);
             let detail_diag = (f64::from(view[2]).hypot(f64::from(view[3])) * full_long / px_per_long) as f32;
             let each = s.light_flare.flares.iter().take(lightcraft_develop::flare::MAX_FLARES);
-            each.map(|f| crate::flare::prepare(f, canvas, Some(detail_diag))).filter(|f| !f.is_dark()).collect()
+            each.filter(|f| !f.hidden).map(|f| crate::flare::prepare(f, canvas, Some(detail_diag))).filter(|f| !f.is_dark()).collect()
         } else {
             Vec::new()
         };

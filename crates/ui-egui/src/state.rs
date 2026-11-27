@@ -253,6 +253,8 @@ pub struct UiState {
     /// flares): not an edit, so not saved.
     #[serde(skip)]
     pub flare_index: usize,
+    /// The Light Flare section's groups (`shape`, `color`, `texture`) unfolded; the others are folded.
+    pub flare_groups_open: Vec<String>,
     /// Guided Upright: the selected guide (photo id + index) while the tool is open. A Delete /
     /// Backspace on it removes that guide alone; a click away or leaving the tool clears it.
     #[serde(skip)]
@@ -486,6 +488,7 @@ impl Default for UiState {
             grading_hidden: None,
             tool: String::new(),
             flare_index: 0,
+            flare_groups_open: Vec::new(),
             selected_guide: None,
             brush_size: 0.04,
             brush_feather: 50.0,

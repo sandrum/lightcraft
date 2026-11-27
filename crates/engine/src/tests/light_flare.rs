@@ -89,3 +89,19 @@ fn flares_are_added_and_removed() {
     assert_eq!(flare(&s, id).flares.len(), 8);
     assert!(s.execute("lightFlare.remove", &json!({"index": 8})).is_err());
 }
+
+#[test]
+fn a_hidden_flare_keeps_its_settings_and_stops_rendering() {
+    let mut s = Session::with_demo();
+    let id = s.active().unwrap();
+    s.execute("lightFlare.add", &json!({})).unwrap();
+    s.execute("develop.set", &json!({"control": "lightFlare.0.brightness", "value": 2.0})).unwrap();
+    let r = s.execute("lightFlare.visible", &json!({"index": 0})).unwrap();
+    assert_eq!(r["visible"], false, "no `visible`: it toggles");
+    let f = flare(&s, id);
+    assert!(f.flares[0].hidden && f.flares[0].brightness == 2.0);
+    assert!(!f.is_active(), "its only flare hidden: nothing renders");
+    s.execute("lightFlare.visible", &json!({"index": 0, "visible": true})).unwrap();
+    assert!(flare(&s, id).is_active());
+    assert!(s.execute("lightFlare.visible", &json!({"index": 1})).is_err());
+}

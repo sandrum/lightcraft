@@ -287,6 +287,10 @@ pub struct LensFlare {
     pub tint: f32,
     #[serde(default)]
     pub texture: FlareTexture,
+    /// Hidden from the render (its eye in the flare list), its settings kept. Not written while
+    /// shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     pub elements: Vec<FlareElement>,
 }
 
@@ -306,6 +310,7 @@ impl LensFlare {
             hue: 0.0,
             tint: 0.0,
             texture: FlareTexture::default(),
+            hidden: false,
             elements,
         }
     }
@@ -389,7 +394,7 @@ impl LightFlare {
 
     /// Whether any flare renders.
     pub fn is_active(&self) -> bool {
-        self.enabled && self.flares.iter().any(|f| f.brightness > 0.0)
+        self.enabled && self.flares.iter().any(|f| !f.hidden && f.brightness > 0.0)
     }
 
     /// `preset`'s elements and category in place of flare `index`'s, keeping its controls,

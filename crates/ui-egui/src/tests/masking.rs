@@ -2331,11 +2331,51 @@ fn a_second_light_flare_is_added_and_each_is_placed_on_its_own() {
     pointer(&mut h, json!([{"kind": "down", "x": 0.5, "y": 0.8}, {"kind": "up", "x": 0.5, "y": 0.8}]));
     let g = develop(&h).light_flare.flares;
     assert!(near(g[0].source, (0.5, 0.8)) && near(g[1].source, (0.8, 0.6)));
-    // Remove takes the selected flare away
-    click(&mut h, "button:lightFlareRemove");
+    // Delete takes the selected flare away
+    click(&mut h, "icon:lightFlareRemove");
     let g = develop(&h).light_flare.flares;
     assert!(g.len() == 1 && near(g[0].source, (0.8, 0.6)));
     h.settle(SETTLE);
+}
+
+/// The flare list: a click on a row selects that flare (the sliders follow), ↓ moves the selection,
+/// the row's eye hides that flare only, and the Shape group shows its sliders once unfolded.
+#[test]
+fn the_flare_list_selects_hides_and_folds() {
+    let mut h = detail("panel.masking");
+    assert_eq!(h.request("ui.resize", json!({"width": 1200, "height": 1400}), T)["ok"], true);
+    let r = h.request("ui.set", json!({"right": "edit", "openSections": ["lightFlare"], "histogram": false}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    click(&mut h, "check:lightFlare.enabled");
+    click(&mut h, "button:lightFlareAdd");
+    click(&mut h, "button:lightFlareAdd");
+    assert_eq!(h.app.ui.flare_index, 2);
+    click(&mut h, "lightFlareRow:0");
+    assert_eq!(h.app.ui.flare_index, 0, "a click on a row selects its flare");
+    let shows = |h: &Headless, id: &str| h.app.widgets.iter().any(|(w, _)| w == id);
+    assert!(shows(&h, "slider:lightFlare.brightness"));
+    let r = h.request("ui.key", json!({"key": "ArrowDown"}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    h.settle(SETTLE);
+    assert_eq!(h.app.ui.flare_index, 1, "↓ moves along the list");
+    // the eye of the row under the pointer hides that flare, not the others
+    click(&mut h, "lightFlareRow:2");
+    click(&mut h, "lightFlareVisible:2");
+    let f = develop(&h).light_flare;
+    assert!(f.flares[2].hidden && !f.flares[0].hidden && !f.flares[1].hidden && f.is_active());
+    // Shape is folded until its title is clicked
+    assert!(!shows(&h, "slider:lightFlare.artifacts"));
+    click(&mut h, "lightFlareGroup:shape");
+    assert!(shows(&h, "slider:lightFlare.artifacts"));
+    h.settle(SETTLE);
+    if let Some(p) = std::env::var_os("LIGHTCRAFT_TEST_SHOTS") {
+        h.app.services.png = Some(Box::new(|img: &lightcraft_raster::Rgba8| {
+            lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(img), &lightcraft_codecs::EncodeMeta::default()).unwrap_or_default()
+        }));
+        h.app.services.write_new = Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string())));
+        let r = h.request("ui.screenshot", json!({"path": std::path::Path::new(&p).join("flare-list.png").to_string_lossy(), "headless": true}), T);
+        assert_eq!(r["ok"], true, "{r}");
+    }
 }
 
 /// A mask's Lens Blur is a block of its own under the mask's sliders: which side it blurs, its

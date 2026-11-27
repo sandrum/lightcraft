@@ -23,9 +23,10 @@ fn place(app: &mut LightcraftApp, i: usize, at: [f64; 2]) {
     let _ = app.run("develop.set", json!({"control": format!("lightFlare.{i}.y"), "value": at[1]}));
 }
 
-/// The marker at a light: a ring with a cross, keylined so it shows over bright and dark photos; the
-/// selected flare's is larger and solid, the others' smaller and fainter.
-fn marker(p: &egui::Painter, c: Pos2, selected: bool) {
+/// The marker at a light: a ring with a cross and the flare's number (as in the section's list),
+/// keylined so it shows over bright and dark photos; the selected flare's is larger and solid, the
+/// others' smaller and fainter.
+fn marker(p: &egui::Painter, c: Pos2, selected: bool, number: usize, font: egui::FontId) {
     let (ring, arm, white, black) = if selected { (9.0, 16.0, 240, 150) } else { (6.0, 11.0, 170, 106) };
     for (w, col) in [(3.5, Color32::from_black_alpha(black)), (1.5, Color32::from_white_alpha(white))] {
         let s = Stroke::new(w, col);
@@ -40,6 +41,10 @@ fn marker(p: &egui::Painter, c: Pos2, selected: bool) {
             p.line_segment([c + a, c + b], s);
         }
     }
+    let at = c + vec2(ring + 3.0, -ring - 1.0);
+    for (d, col) in [(vec2(1.0, 1.0), Color32::from_black_alpha(black)), (vec2(0.0, 0.0), Color32::from_white_alpha(white))] {
+        p.text(at + d, egui::Align2::LEFT_BOTTOM, number.to_string(), font.clone(), col);
+    }
 }
 
 pub(super) fn light_flare_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, map: &CanvasMap, d: &DevelopSettings) {
@@ -51,9 +56,10 @@ pub(super) fn light_flare_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, re
     }
     let selected = app.ui.flare_index.min(lights.len() - 1);
     let p = ui.painter_at(app.canvas_rect.unwrap_or(r));
+    let font = crate::theme::Tokens::get(ui.ctx()).semibold(12.0);
     // the selected one last, on top
     for (k, c) in lights.iter().enumerate().filter(|(k, _)| *k != selected).chain(std::iter::once((selected, &lights[selected]))) {
-        marker(&p, *c, k == selected);
+        marker(&p, *c, k == selected, k + 1, font.clone());
         register(ui, format!("lightFlare:light:{k}"), Rect::from_center_size(*c, vec2(18.0, 18.0)));
     }
     if resp.hovered() {
